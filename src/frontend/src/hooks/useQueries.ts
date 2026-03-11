@@ -1,7 +1,8 @@
 /**
  * useQueries — hybrid data layer.
  *
- * ICP canister (actor):  global memories, rules, knowledge edges, sentry avatar
+ * ICP canister (actor):  global memories, rules, knowledge edges, sentry avatar,
+ *                        chat messages, custom GIFs, custom emojis
  * localStorage (localDB): user memories, personality, timeline, user avatar
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -30,6 +31,25 @@ import { useActor } from "./useActor";
 
 function user(): string {
   return getCurrentUser() || "guest";
+}
+
+// ── Canister message types (not in backend.d.ts yet) ─────────────────────────
+export interface CanisterChatMessage {
+  id: bigint;
+  role: string;
+  name: string;
+  content: string;
+  attachmentsJson: string;
+  timestamp: bigint;
+}
+export interface CanisterCustomGif {
+  id: bigint;
+  url: string;
+  gifLabel: string;
+}
+export interface CanisterCustomEmoji {
+  id: bigint;
+  emoji: string;
 }
 
 // ── Auth helper ────────────────────────────────────────────────────────────────
@@ -118,8 +138,10 @@ export function useGetSentryAvatar() {
   return useQuery<string>({
     queryKey: ["sentryAvatar"],
     queryFn: async () => {
-      if (!actor) return "";
-      return actor.getSentryAvatar();
+      if (!actor) return localStorage.getItem("sentry_avatar_v2") || "";
+      const canisterResult = await actor.getSentryAvatar();
+      if (canisterResult) return canisterResult;
+      return localStorage.getItem("sentry_avatar_v2") || "";
     },
     enabled: !!actor && !isFetching,
   });
@@ -282,14 +304,19 @@ export function useSetUserAvatar() {
   });
 }
 
-/** Set sentry avatar → ICP actor */
+/** Set sentry avatar → ICP actor + localStorage fallback */
 export function useSetSentryAvatar() {
   const { actor } = useActor();
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (url: string) => {
-      if (!actor) throw new Error("Actor not ready");
-      return actor.setSentryAvatar(url);
+      localStorage.setItem("sentry_avatar_v2", url);
+      if (!actor) return;
+      try {
+        await actor.setSentryAvatar(url);
+      } catch {
+        // already saved to localStorage above, silent fallback
+      }
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["sentryAvatar"] }),
   });
@@ -374,5 +401,142 @@ export function useImportGlobalData() {
       return actor.importGlobalData(jsonData);
     },
     onSuccess: () => qc.invalidateQueries(),
+  });
+}
+
+// ── ICP: Chat Messages ─────────────────────────────────────────────────────────
+
+export function useGetChatMessages() {
+  const { actor, isFetching } = useActor();
+  return useQuery<CanisterChatMessage[]>({
+    queryKey: ["chatMessages"],
+    queryFn: async () => {
+      if (!actor) return [];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return (actor as any).getChatMessages();
+    },
+    enabled: !!actor && !isFetching,
+    refetchInterval: 3000,
+  });
+}
+
+export function useAddChatMessage() {
+  const { actor } = useActor();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (msg: {
+      role: string;
+      name: string;
+      content: string;
+      attachmentsJson: string;
+    }) => {
+      if (!actor) throw new Error("No actor");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return (actor as any).addChatMessage(
+        msg.role,
+        msg.name,
+        msg.content,
+        msg.attachmentsJson,
+      );
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["chatMessages"] }),
+  });
+}
+
+export function useClearChatMessages() {
+  const { actor } = useActor();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      if (!actor) throw new Error("No actor");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return (actor as any).clearChatMessages();
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["chatMessages"] }),
+  });
+}
+
+// ── ICP: Custom GIFs ───────────────────────────────────────────────────────────
+
+export function useGetCustomGifs() {
+  const { actor, isFetching } = useActor();
+  return useQuery<CanisterCustomGif[]>({
+    queryKey: ["customGifs"],
+    queryFn: async () => {
+      if (!actor) return [];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return (actor as any).getCustomGifs();
+    },
+    enabled: !!actor && !isFetching,
+  });
+}
+
+export function useAddCustomGif() {
+  const { actor } = useActor();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      url,
+      gifLabel,
+    }: { url: string; gifLabel: string }) => {
+      if (!actor) throw new Error("No actor");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return (actor as any).addCustomGif(url, gifLabel);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["customGifs"] }),
+  });
+}
+
+export function useDeleteCustomGif() {
+  const { actor } = useActor();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: bigint) => {
+      if (!actor) throw new Error("No actor");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return (actor as any).deleteCustomGif(id);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["customGifs"] }),
+  });
+}
+
+// ── ICP: Custom Emojis ─────────────────────────────────────────────────────────
+
+export function useGetCustomEmojis() {
+  const { actor, isFetching } = useActor();
+  return useQuery<CanisterCustomEmoji[]>({
+    queryKey: ["customEmojis"],
+    queryFn: async () => {
+      if (!actor) return [];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return (actor as any).getCustomEmojis();
+    },
+    enabled: !!actor && !isFetching,
+  });
+}
+
+export function useAddCustomEmoji() {
+  const { actor } = useActor();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (emoji: string) => {
+      if (!actor) throw new Error("No actor");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return (actor as any).addCustomEmoji(emoji);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["customEmojis"] }),
+  });
+}
+
+export function useDeleteCustomEmoji() {
+  const { actor } = useActor();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: bigint) => {
+      if (!actor) throw new Error("No actor");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return (actor as any).deleteCustomEmoji(id);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["customEmojis"] }),
   });
 }

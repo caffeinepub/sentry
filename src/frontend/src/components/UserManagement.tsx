@@ -1,13 +1,24 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { AlertTriangle, Search, Trash2, UserPlus, X } from "lucide-react";
+import {
+  AlertTriangle,
+  Check,
+  Pencil,
+  Search,
+  Shield,
+  Trash2,
+  UserPlus,
+  X,
+} from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import {
   addUser,
   getCredentials,
   getCurrentUser,
+  isProtectedUser,
   removeUser,
+  updateUser,
 } from "../utils/localAuth";
 
 interface UserManagementProps {
@@ -20,6 +31,9 @@ export default function UserManagement({ open, onClose }: UserManagementProps) {
   const [newUsername, setNewUsername] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [editingUser, setEditingUser] = useState<string | null>(null);
+  const [editUsername, setEditUsername] = useState("");
+  const [editPassword, setEditPassword] = useState("");
   const [, forceUpdate] = useState(0);
 
   if (!open) return null;
@@ -61,13 +75,38 @@ export default function UserManagement({ open, onClose }: UserManagementProps) {
     }
   };
 
+  const startEdit = (username: string) => {
+    setEditingUser(username);
+    setEditUsername(username);
+    setEditPassword("");
+  };
+
+  const saveEdit = (oldUsername: string) => {
+    if (!editPassword.trim()) {
+      toast.error("Password required");
+      return;
+    }
+    const targetUsername = isProtectedUser(oldUsername)
+      ? oldUsername
+      : editUsername.trim();
+    if (!targetUsername) {
+      toast.error("Username required");
+      return;
+    }
+    if (updateUser(oldUsername, targetUsername, editPassword.trim())) {
+      toast.success(`Agent "${targetUsername}" updated`);
+      setEditingUser(null);
+      forceUpdate((n) => n + 1);
+    } else {
+      toast.error("Update failed — username may be taken");
+    }
+  };
+
   return (
-    // Backdrop
     <div
       className="fixed inset-0 z-50 flex items-center justify-center"
       style={{ background: "oklch(0 0 0 / 0.8)" }}
     >
-      {/* Invisible click-away area */}
       <button
         type="button"
         className="absolute inset-0 w-full h-full cursor-default"
@@ -104,11 +143,11 @@ export default function UserManagement({ open, onClose }: UserManagementProps) {
           />
         </div>
 
-        <div className="space-y-1.5 mb-6 max-h-48 overflow-y-auto">
+        <div className="space-y-1.5 mb-6 max-h-56 overflow-y-auto">
           {filtered.map((c, idx) => (
             <div
               key={c.username}
-              className="flex items-center justify-between px-3 py-2 bg-secondary/30 border border-border rounded"
+              className="flex items-center gap-1.5 px-3 py-2 bg-secondary/30 border border-border rounded"
               data-ocid={
                 idx === 0
                   ? "user_management.item.1"
@@ -119,51 +158,113 @@ export default function UserManagement({ open, onClose }: UserManagementProps) {
                       : undefined
               }
             >
-              <div>
-                <span className="text-xs font-mono text-foreground">
-                  {c.username}
-                </span>
-                {c.username === currentUser && (
-                  <span className="ml-2 text-[9px] font-mono text-gold">
-                    [YOU]
-                  </span>
-                )}
-              </div>
-              {confirmDelete === c.username ? (
-                <div className="flex items-center gap-1">
-                  <span className="text-[10px] font-mono text-destructive mr-1">
-                    Confirm?
-                  </span>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="w-6 h-6 text-destructive hover:bg-destructive/10"
-                    onClick={() => handleRemove(c.username)}
-                    data-ocid="user_management.confirm_button"
-                  >
-                    <AlertTriangle className="w-3 h-3" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="w-6 h-6 text-muted-foreground"
-                    onClick={() => setConfirmDelete(null)}
-                    data-ocid="user_management.cancel_button"
-                  >
-                    <X className="w-3 h-3" />
-                  </Button>
+              {editingUser === c.username ? (
+                <div className="flex-1 flex flex-col gap-1.5">
+                  <Input
+                    value={editUsername}
+                    onChange={(e) => setEditUsername(e.target.value)}
+                    disabled={isProtectedUser(c.username)}
+                    placeholder="Username"
+                    className="h-7 text-xs font-mono bg-input border-border"
+                    data-ocid="user_management.input"
+                  />
+                  <Input
+                    type="password"
+                    value={editPassword}
+                    onChange={(e) => setEditPassword(e.target.value)}
+                    placeholder="New access code"
+                    className="h-7 text-xs font-mono bg-input border-border"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") saveEdit(c.username);
+                      if (e.key === "Escape") setEditingUser(null);
+                    }}
+                    autoFocus
+                  />
+                  <div className="flex gap-1">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-6 px-2 text-[10px] text-gold hover:bg-gold/10 font-mono"
+                      onClick={() => saveEdit(c.username)}
+                      data-ocid="user_management.save_button"
+                    >
+                      <Check className="w-3 h-3 mr-1" />
+                      SAVE
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-6 px-2 text-[10px] text-muted-foreground font-mono"
+                      onClick={() => setEditingUser(null)}
+                      data-ocid="user_management.cancel_button"
+                    >
+                      CANCEL
+                    </Button>
+                  </div>
                 </div>
               ) : (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="w-6 h-6 text-muted-foreground hover:text-destructive"
-                  disabled={c.username === currentUser}
-                  onClick={() => setConfirmDelete(c.username)}
-                  data-ocid="user_management.delete_button.1"
-                >
-                  <Trash2 className="w-3 h-3" />
-                </Button>
+                <>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      {isProtectedUser(c.username) && (
+                        <Shield className="w-3 h-3 text-gold/50 shrink-0" />
+                      )}
+                      <span className="text-xs font-mono text-foreground truncate">
+                        {c.username}
+                      </span>
+                      {c.username === currentUser && (
+                        <span className="text-[9px] font-mono text-gold">
+                          [YOU]
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-0.5 shrink-0">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="w-6 h-6 text-muted-foreground hover:text-gold"
+                      onClick={() => startEdit(c.username)}
+                      data-ocid="user_management.edit_button.1"
+                    >
+                      <Pencil className="w-3 h-3" />
+                    </Button>
+                    {!isProtectedUser(c.username) &&
+                      (confirmDelete === c.username ? (
+                        <div className="flex items-center gap-0.5">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="w-6 h-6 text-destructive hover:bg-destructive/10"
+                            onClick={() => handleRemove(c.username)}
+                            data-ocid="user_management.confirm_button"
+                          >
+                            <AlertTriangle className="w-3 h-3" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="w-6 h-6 text-muted-foreground"
+                            onClick={() => setConfirmDelete(null)}
+                            data-ocid="user_management.cancel_button"
+                          >
+                            <X className="w-3 h-3" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="w-6 h-6 text-muted-foreground hover:text-destructive"
+                          disabled={c.username === currentUser}
+                          onClick={() => setConfirmDelete(c.username)}
+                          data-ocid="user_management.delete_button.1"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </Button>
+                      ))}
+                  </div>
+                </>
               )}
             </div>
           ))}

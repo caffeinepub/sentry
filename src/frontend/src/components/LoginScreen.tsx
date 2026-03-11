@@ -1,7 +1,7 @@
-import { Brain } from "lucide-react";
+import { Brain, Camera } from "lucide-react";
 import { motion } from "motion/react";
-import { useState } from "react";
-import { login } from "../utils/localAuth";
+import { useRef, useState } from "react";
+import { login, loginWithAvatar } from "../utils/localAuth";
 
 interface LoginScreenProps {
   onLogin: () => void;
@@ -12,6 +12,9 @@ export default function LoginScreen({ onLogin }: LoginScreenProps) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [shake, setShake] = useState(false);
+  const [photoUsername, setPhotoUsername] = useState("");
+  const [photoError, setPhotoError] = useState("");
+  const photoInputRef = useRef<HTMLInputElement>(null);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -24,8 +27,29 @@ export default function LoginScreen({ onLogin }: LoginScreenProps) {
     }
   };
 
+  const handlePhotoLogin = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const dataUrl = ev.target?.result as string;
+      if (!photoUsername.trim()) {
+        setPhotoError("ENTER AGENT ID FIRST");
+        return;
+      }
+      if (loginWithAvatar(photoUsername.trim(), dataUrl)) {
+        onLogin();
+      } else {
+        setPhotoError("PHOTO NOT RECOGNIZED");
+        setTimeout(() => setPhotoError(""), 3000);
+      }
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  };
+
   return (
-    <div className="fixed inset-0 bg-black flex items-center justify-center overflow-hidden">
+    <div className="fixed inset-0 bg-black flex items-center justify-center overflow-y-auto py-8">
       <div
         className="absolute inset-0 opacity-10"
         style={{
@@ -125,10 +149,70 @@ export default function LoginScreen({ onLogin }: LoginScreenProps) {
           </button>
         </form>
 
+        {/* Photo login */}
+        <div className="my-6 flex items-center gap-3">
+          <div className="flex-1 h-px bg-gold/20" />
+          <span className="text-[10px] font-mono text-gold/40 tracking-widest">
+            OR
+          </span>
+          <div className="flex-1 h-px bg-gold/20" />
+        </div>
+
+        <div className="space-y-3">
+          <p className="text-[10px] font-mono text-gold/60 tracking-widest">
+            PHOTO LOGIN
+          </p>
+          <div className="space-y-1">
+            <label
+              htmlFor="photo-login-username"
+              className="text-[10px] font-mono text-gold/40 tracking-widest block"
+            >
+              AGENT ID FOR PHOTO LOGIN
+            </label>
+            <input
+              id="photo-login-username"
+              type="text"
+              value={photoUsername}
+              onChange={(e) => {
+                setPhotoUsername(e.target.value);
+                setPhotoError("");
+              }}
+              className="w-full bg-black border border-gold/20 text-gold font-mono text-sm px-4 py-2.5 rounded focus:outline-none focus:border-gold/60 placeholder:text-muted-foreground/20 transition-colors"
+              placeholder="Enter agent ID"
+              data-ocid="login.photo_input"
+            />
+          </div>
+          <button
+            type="button"
+            onClick={() => photoInputRef.current?.click()}
+            className="w-full py-2.5 bg-black border border-gold/30 text-gold/70 font-mono text-xs tracking-[0.2em] rounded hover:bg-gold/10 hover:border-gold/50 hover:text-gold transition-all flex items-center justify-center gap-2"
+            data-ocid="login.upload_button"
+          >
+            <Camera className="w-3.5 h-3.5" />
+            UPLOAD PHOTO TO LOGIN
+          </button>
+          {photoError && (
+            <p
+              className="text-xs font-mono text-destructive text-center tracking-widest"
+              data-ocid="login.photo_error_state"
+            >
+              {photoError}
+            </p>
+          )}
+        </div>
+
         <p className="text-center text-[10px] font-mono text-muted-foreground/30 mt-8 tracking-widest">
           AUTHORIZED PERSONNEL ONLY
         </p>
       </motion.div>
+
+      <input
+        ref={photoInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={handlePhotoLogin}
+      />
 
       <style>{`
         @keyframes shake {

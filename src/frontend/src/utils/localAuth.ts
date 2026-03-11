@@ -38,6 +38,7 @@ export function addUser(username: string, password: string): boolean {
 }
 
 export function removeUser(username: string): boolean {
+  if (isProtectedUser(username)) return false;
   const creds = getCredentials();
   if (creds.length <= 1) return false;
   const current = getCurrentUser();
@@ -47,6 +48,62 @@ export function removeUser(username: string): boolean {
   );
   if (updated.length === creds.length) return false;
   saveCredentials(updated);
+  return true;
+}
+
+export function isProtectedUser(username: string): boolean {
+  const lower = username.toLowerCase();
+  return lower === "unity" || lower === "syndelious";
+}
+
+export function updateUser(
+  oldUsername: string,
+  newUsername: string,
+  newPassword: string,
+): boolean {
+  const creds = getCredentials();
+  const idx = creds.findIndex(
+    (c) => c.username.toLowerCase() === oldUsername.toLowerCase(),
+  );
+  if (idx === -1) return false;
+  const isProtected = isProtectedUser(oldUsername);
+  const finalUsername = isProtected ? creds[idx].username : newUsername.trim();
+  if (!finalUsername || !newPassword.trim()) return false;
+  if (
+    !isProtected &&
+    finalUsername.toLowerCase() !== oldUsername.toLowerCase()
+  ) {
+    const conflict = creds.find(
+      (c, i) =>
+        i !== idx && c.username.toLowerCase() === finalUsername.toLowerCase(),
+    );
+    if (conflict) return false;
+  }
+  creds[idx] = { username: finalUsername, password: newPassword.trim() };
+  saveCredentials(creds);
+  return true;
+}
+
+export function setUserLoginAvatar(username: string, dataUrl: string): void {
+  localStorage.setItem(`sentry_login_avatar_${username}`, dataUrl);
+}
+
+export function getUserLoginAvatar(username: string): string | null {
+  return localStorage.getItem(`sentry_login_avatar_${username}`);
+}
+
+export function loginWithAvatar(
+  username: string,
+  avatarDataUrl: string,
+): boolean {
+  const stored = getUserLoginAvatar(username);
+  if (!stored || stored !== avatarDataUrl) return false;
+  const creds = getCredentials();
+  const match = creds.find(
+    (c) => c.username.toLowerCase() === username.toLowerCase(),
+  );
+  if (!match) return false;
+  localStorage.setItem(SESSION_KEY, match.username);
   return true;
 }
 
@@ -72,4 +129,11 @@ export function getCurrentUser(): string | null {
 
 export function isLoggedIn(): boolean {
   return !!getCurrentUser();
+}
+
+export function getSentryAvatarLocal(): string {
+  return localStorage.getItem("sentry_avatar_v2") || "";
+}
+export function setSentryAvatarLocal(url: string): void {
+  localStorage.setItem("sentry_avatar_v2", url);
 }

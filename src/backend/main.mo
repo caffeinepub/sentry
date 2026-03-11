@@ -12,7 +12,6 @@ import Array "mo:core/Array";
 import MixinAuthorization "authorization/MixinAuthorization";
 
 actor {
-  // State variables
   let accessControlState = AccessControl.initState();
   include MixinAuthorization(accessControlState);
   include MixinStorage();
@@ -70,6 +69,26 @@ actor {
     relationType : Text;
   };
 
+  type ChatMessage = {
+    id : Nat;
+    role : Text;
+    name : Text;
+    content : Text;
+    attachmentsJson : Text;
+    timestamp : Int;
+  };
+
+  type CustomGif = {
+    id : Nat;
+    url : Text;
+    gifLabel : Text;
+  };
+
+  type CustomEmoji = {
+    id : Nat;
+    emoji : Text;
+  };
+
   var nextId = 0;
   var sentryAvatarUrl = "/default-avatar.png";
   let memories = Map.empty<Nat, Memory>();
@@ -77,13 +96,92 @@ actor {
   let knowledgeEdges = Map.empty<Nat, KnowledgeEdge>();
   let timelines = Map.empty<Text, [TimelineEntry]>();
   let userProfiles = Map.empty<Principal, UserProfile>();
+  let chatMessages = Map.empty<Nat, ChatMessage>();
+  let customGifs = Map.empty<Nat, CustomGif>();
+  let customEmojis = Map.empty<Nat, CustomEmoji>();
 
   func getNextId() : Nat {
     nextId += 1;
     nextId;
   };
 
-  // Memories
+  // ── Chat Messages ────────────────────────────────────────────────────────────
+
+  public shared ({ caller }) func addChatMessage(role : Text, name : Text, content : Text, attachmentsJson : Text) : async Nat {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      Runtime.trap("Unauthorized");
+    };
+    let id = getNextId();
+    let msg : ChatMessage = { id; role; name; content; attachmentsJson; timestamp = Int.abs(id) * 1000 };
+    chatMessages.add(id, msg);
+    id;
+  };
+
+  public query func getChatMessages() : async [ChatMessage] {
+    chatMessages.values().toArray();
+  };
+
+  public shared ({ caller }) func clearChatMessages() : async () {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      Runtime.trap("Unauthorized");
+    };
+    for (id in chatMessages.keys().toArray().vals()) {
+      chatMessages.remove(id);
+    };
+  };
+
+  // ── Custom GIFs ──────────────────────────────────────────────────────────────
+
+  public shared ({ caller }) func addCustomGif(url : Text, gifLabel : Text) : async Nat {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      Runtime.trap("Unauthorized");
+    };
+    let id = getNextId();
+    customGifs.add(id, { id; url; gifLabel });
+    id;
+  };
+
+  public query func getCustomGifs() : async [CustomGif] {
+    customGifs.values().toArray();
+  };
+
+  public shared ({ caller }) func deleteCustomGif(id : Nat) : async Bool {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      Runtime.trap("Unauthorized");
+    };
+    switch (customGifs.get(id)) {
+      case (null) { false };
+      case (?_) { customGifs.remove(id); true };
+    };
+  };
+
+  // ── Custom Emojis ────────────────────────────────────────────────────────────
+
+  public shared ({ caller }) func addCustomEmoji(emoji : Text) : async Nat {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      Runtime.trap("Unauthorized");
+    };
+    let id = getNextId();
+    customEmojis.add(id, { id; emoji });
+    id;
+  };
+
+  public query func getCustomEmojis() : async [CustomEmoji] {
+    customEmojis.values().toArray();
+  };
+
+  public shared ({ caller }) func deleteCustomEmoji(id : Nat) : async Bool {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      Runtime.trap("Unauthorized");
+    };
+    switch (customEmojis.get(id)) {
+      case (null) { false };
+      case (?_) { customEmojis.remove(id); true };
+    };
+  };
+
+  // ── Memories ─────────────────────────────────────────────────────────────────
+
   public shared ({ caller }) func addMemory(text : Text, memoryType : Text, concepts : [Text], isGlobal : Bool) : async Nat {
     if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
       Runtime.trap("Unauthorized: Only users can add memories");
@@ -138,7 +236,8 @@ actor {
     };
   };
 
-  // Rules
+  // ── Rules ────────────────────────────────────────────────────────────────────
+
   public shared ({ caller }) func addRule(condition : Text, effect : Text) : async Nat {
     if (not AccessControl.isAdmin(accessControlState, caller)) {
       Runtime.trap("Unauthorized: Only admins can add rules");
@@ -171,7 +270,8 @@ actor {
     };
   };
 
-  // Knowledge Edges
+  // ── Knowledge Edges ──────────────────────────────────────────────────────────
+
   public shared ({ caller }) func addKnowledgeEdge(fromId : Nat, toId : Nat, relationType : Text) : async () {
     if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
       Runtime.trap("Unauthorized: Only users can add knowledge edges");
@@ -189,103 +289,68 @@ actor {
     knowledgeEdges.values().toArray();
   };
 
-  // Personality Profile
+  // ── Personality ──────────────────────────────────────────────────────────────
+
   public query ({ caller }) func getPersonality() : async PersonalityProfile {
     switch (userProfiles.get(caller)) {
-      case (null) {
-        {
-          curiosity = 0.5;
-          friendliness = 0.5;
-          analytical = 0.5;
-        };
-      };
+      case (null) { { curiosity = 0.5; friendliness = 0.5; analytical = 0.5 } };
       case (?profile) { profile.personality };
     };
   };
 
   public shared ({ caller }) func updatePersonality(curiosity : Float, friendliness : Float, analytical : Float) : async () {
     if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
-      Runtime.trap("Unauthorized: Only users can update personality");
+      Runtime.trap("Unauthorized");
     };
     let principalId = caller.toText();
-    let updatedPersonality : PersonalityProfile = {
-      curiosity;
-      friendliness;
-      analytical;
-    };
-
+    let updatedPersonality : PersonalityProfile = { curiosity; friendliness; analytical };
     switch (userProfiles.get(caller)) {
       case (null) {
-        let newProfile : UserProfile = {
-          principalId;
-          username = "";
-          avatarUrl = "";
-          personality = updatedPersonality;
-        };
-        userProfiles.add(caller, newProfile);
+        userProfiles.add(caller, { principalId; username = ""; avatarUrl = ""; personality = updatedPersonality });
       };
       case (?profile) {
-        let updatedProfile : UserProfile = {
-          profile with personality = updatedPersonality;
-        };
-        userProfiles.add(caller, updatedProfile);
+        userProfiles.add(caller, { profile with personality = updatedPersonality });
       };
     };
   };
 
-  // Timeline
+  // ── Timeline ─────────────────────────────────────────────────────────────────
+
   public shared ({ caller }) func addTimelineEntry(event : Text, personalitySnapshot : PersonalityProfile) : async Nat {
     if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
-      Runtime.trap("Unauthorized: Only users can add timeline entries");
+      Runtime.trap("Unauthorized");
     };
     let id = getNextId();
-    let entry : TimelineEntry = {
-      id;
-      event;
-      timestamp = Int.abs(id) * 1000;
-      personalitySnapshot;
-    };
+    let entry : TimelineEntry = { id; event; timestamp = Int.abs(id) * 1000; personalitySnapshot };
     let principalId = caller.toText();
-    let currentTimeline = switch (timelines.get(principalId)) {
+    let current = switch (timelines.get(principalId)) {
       case (null) { [] };
-      case (?timeline) { timeline };
+      case (?t) { t };
     };
-    timelines.add(principalId, currentTimeline.concat([entry]));
+    timelines.add(principalId, current.concat([entry]));
     id;
   };
 
   public query ({ caller }) func getTimeline() : async [TimelineEntry] {
     switch (timelines.get(caller.toText())) {
       case (null) { [] };
-      case (?timeline) { timeline };
+      case (?t) { t };
     };
   };
 
-  // Avatars and Profiles
+  // ── Avatars & Profiles ───────────────────────────────────────────────────────
+
   public shared ({ caller }) func setUserAvatar(avatarUrl : Text) : async () {
     if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
-      Runtime.trap("Unauthorized: Only users can set avatar");
+      Runtime.trap("Unauthorized");
     };
     let principalId = caller.toText();
     switch (userProfiles.get(caller)) {
       case (null) {
-        let newProfile : UserProfile = {
-          principalId;
-          username = "";
-          avatarUrl;
-          personality = {
-            curiosity = 0.5;
-            friendliness = 0.5;
-            analytical = 0.5;
-          };
-        };
-        userProfiles.add(caller, newProfile);
+        userProfiles.add(caller, { principalId; username = ""; avatarUrl; personality = { curiosity = 0.5; friendliness = 0.5; analytical = 0.5 } });
       };
       case (?profile) {
-        let updatedProfile : UserProfile = {
-          profile with avatarUrl;
-        };
-        userProfiles.add(caller, updatedProfile);
+        userProfiles.add(caller, { profile with avatarUrl });
       };
     };
   };
@@ -297,63 +362,51 @@ actor {
     sentryAvatarUrl := avatarUrl;
   };
 
-  public query ({ caller }) func getSentryAvatar() : async Text {
+  public query func getSentryAvatar() : async Text {
     sentryAvatarUrl;
   };
 
   public query ({ caller }) func getCallerUserProfile() : async ?UserProfile {
     if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
-      Runtime.trap("Unauthorized: Only users can access profiles");
+      Runtime.trap("Unauthorized");
     };
     userProfiles.get(caller);
   };
 
   public query ({ caller }) func getUserProfile(user : Principal) : async ?UserProfile {
     if (caller != user and not AccessControl.isAdmin(accessControlState, caller)) {
-      Runtime.trap("Unauthorized: Can only view your own profile");
+      Runtime.trap("Unauthorized");
     };
     userProfiles.get(user);
   };
 
   public shared ({ caller }) func saveCallerUserProfile(profile : UserProfile) : async () {
     if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
-      Runtime.trap("Unauthorized: Only users can save profiles");
+      Runtime.trap("Unauthorized");
     };
     userProfiles.add(caller, profile);
   };
 
   public shared ({ caller }) func setUsername(username : Text) : async () {
     if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
-      Runtime.trap("Unauthorized: Only users can set username");
+      Runtime.trap("Unauthorized");
     };
     let principalId = caller.toText();
     switch (userProfiles.get(caller)) {
       case (null) {
-        let newProfile : UserProfile = {
-          principalId;
-          username;
-          avatarUrl = "";
-          personality = {
-            curiosity = 0.5;
-            friendliness = 0.5;
-            analytical = 0.5;
-          };
-        };
-        userProfiles.add(caller, newProfile);
+        userProfiles.add(caller, { principalId; username; avatarUrl = ""; personality = { curiosity = 0.5; friendliness = 0.5; analytical = 0.5 } });
       };
       case (?profile) {
-        let updatedProfile : UserProfile = {
-          profile with username;
-        };
-        userProfiles.add(caller, updatedProfile);
+        userProfiles.add(caller, { profile with username });
       };
     };
   };
 
-  // Data Export/Import
+  // ── Export / Import ──────────────────────────────────────────────────────────
+
   public query ({ caller }) func exportUserData() : async Text {
     if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
-      Runtime.trap("Unauthorized: Only users can export their data");
+      Runtime.trap("Unauthorized");
     };
     let principalId = caller.toText();
     switch (userProfiles.get(caller)) {
@@ -368,14 +421,14 @@ actor {
 
   public query ({ caller }) func exportGlobalData() : async Text {
     if (not AccessControl.isAdmin(accessControlState, caller)) {
-      Runtime.trap("Unauthorized: Only admins can export global data");
+      Runtime.trap("Unauthorized");
     };
     "{ \"memories\": [], \"rules\": [] }";
   };
 
   public shared ({ caller }) func importUserData(_jsonData : Text) : async Bool {
     if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
-      Runtime.trap("Unauthorized: Only users can import their data");
+      Runtime.trap("Unauthorized");
     };
     ignore _jsonData;
     false;
@@ -383,7 +436,7 @@ actor {
 
   public shared ({ caller }) func importGlobalData(_jsonData : Text) : async Bool {
     if (not AccessControl.isAdmin(accessControlState, caller)) {
-      Runtime.trap("Unauthorized: Only admins can import global data");
+      Runtime.trap("Unauthorized");
     };
     ignore _jsonData;
     false;

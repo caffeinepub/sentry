@@ -47,6 +47,23 @@ export interface UserProfile {
   'avatarUrl' : string,
   'principalId' : string,
 }
+export interface ChatMessage {
+  'id' : bigint,
+  'role' : string,
+  'name' : string,
+  'content' : string,
+  'attachmentsJson' : string,
+  'timestamp' : bigint,
+}
+export interface CustomGif {
+  'id' : bigint,
+  'url' : string,
+  'gifLabel' : string,
+}
+export interface CustomEmoji {
+  'id' : bigint,
+  'emoji' : string,
+}
 export type UserRole = { 'admin' : null } |
   { 'user' : null } |
   { 'guest' : null };
@@ -105,6 +122,15 @@ export interface _SERVICE {
   'setUserAvatar' : ActorMethod<[string], undefined>,
   'setUsername' : ActorMethod<[string], undefined>,
   'updatePersonality' : ActorMethod<[number, number, number], undefined>,
+  'addChatMessage' : ActorMethod<[string, string, string, string], bigint>,
+  'getChatMessages' : ActorMethod<[], Array<ChatMessage>>,
+  'clearChatMessages' : ActorMethod<[], undefined>,
+  'addCustomGif' : ActorMethod<[string, string], bigint>,
+  'getCustomGifs' : ActorMethod<[], Array<CustomGif>>,
+  'deleteCustomGif' : ActorMethod<[bigint], boolean>,
+  'addCustomEmoji' : ActorMethod<[string], bigint>,
+  'getCustomEmojis' : ActorMethod<[], Array<CustomEmoji>>,
+  'deleteCustomEmoji' : ActorMethod<[bigint], boolean>,
 }
 export declare const idlService: IDL.ServiceClass;
 export declare const idlInitArgs: IDL.Type[];

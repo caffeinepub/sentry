@@ -19,7 +19,14 @@ function formatTs(ts: bigint) {
   return new Date(Number(ts) / 1_000_000).toLocaleDateString();
 }
 
-type FilterTab = "all" | "knowledge" | "rules" | "history" | "personal";
+type FilterTab =
+  | "all"
+  | "knowledge"
+  | "rules"
+  | "history"
+  | "personal"
+  | "user"
+  | "global";
 
 interface MemoryItem {
   id: bigint;
@@ -82,6 +89,8 @@ export default function MemoryExplorer({ onMemoryClick }: MemoryExplorerProps) {
     if (activeTab === "knowledge") return m.memoryType === "knowledge";
     if (activeTab === "history") return m.memoryType === "history";
     if (activeTab === "personal") return m.memoryType === "personal";
+    if (activeTab === "user") return m.isGlobal === false;
+    if (activeTab === "global") return m.isGlobal === true || m.isRule === true;
     return true;
   });
 
@@ -140,6 +149,8 @@ export default function MemoryExplorer({ onMemoryClick }: MemoryExplorerProps) {
     "rules",
     "history",
     "personal",
+    "user",
+    "global",
   ];
 
   return (
@@ -267,6 +278,11 @@ export default function MemoryExplorer({ onMemoryClick }: MemoryExplorerProps) {
                         SHARED
                       </span>
                     )}
+                    {!item.isGlobal && (
+                      <span className="text-[8px] font-mono text-blue-400/60 tracking-widest">
+                        USER
+                      </span>
+                    )}
                   </div>
 
                   {editingId === item.id ? (
@@ -314,7 +330,6 @@ export default function MemoryExplorer({ onMemoryClick }: MemoryExplorerProps) {
 
                 {editingId !== item.id && (
                   <div className="flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 shrink-0">
-                    {/* Only non-global, non-rule memories can be edited inline */}
                     {!item.isRule && !item.isGlobal && (
                       <Button
                         variant="ghost"
