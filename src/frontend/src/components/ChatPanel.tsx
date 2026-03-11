@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Clock, Paperclip, Send, User } from "lucide-react";
+import { Clock, Paperclip, Send, SmilePlus, User } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -8,12 +8,15 @@ import {
   useAddMemory,
   useAddRule,
   useAddTimelineEntry,
-  useGetCallerUserProfile,
+  useGetCurrentUser,
   useGetMemories,
   useGetPersonality,
   useGetRules,
+  useGetSentryAvatar,
   useGetTimeline,
+  useGetUserAvatar,
   useGetUserMemories,
+  useSetSentryAvatar,
   useSetUserAvatar,
   useUpdatePersonality,
 } from "../hooks/useQueries";
@@ -21,7 +24,10 @@ import type { Attachment, ChatMessage } from "../types/sentry";
 import {
   buildIdentityResponse,
   buildReasoningChain,
+  detectConceptsFromNaturalLanguage,
   generateAIResponse,
+  interpretLink,
+  interpretMediaAttachment,
 } from "../utils/aiEngine";
 import PersonalityBars from "./PersonalityBars";
 import TimelinePanel from "./TimelinePanel";
@@ -32,6 +38,74 @@ const DEFAULT_PERSONALITY = {
   friendliness: 0.5,
   analytical: 0.5,
 };
+
+const EMOJI_LIST = [
+  "😀",
+  "😂",
+  "🥰",
+  "😎",
+  "🤔",
+  "😮",
+  "😅",
+  "🙃",
+  "😍",
+  "🤩",
+  "😤",
+  "😢",
+  "😡",
+  "🤯",
+  "😴",
+  "👍",
+  "👎",
+  "👏",
+  "🙌",
+  "🤝",
+  "✌️",
+  "🤞",
+  "💪",
+  "🫡",
+  "👀",
+  "❤️",
+  "🧡",
+  "💛",
+  "💚",
+  "💙",
+  "💜",
+  "🖤",
+  "🤍",
+  "🔥",
+  "✨",
+  "⭐",
+  "🌟",
+  "💫",
+  "🎯",
+  "🚀",
+  "🧠",
+  "💡",
+  "🔑",
+  "🏆",
+  "🎉",
+  "🌙",
+  "☀️",
+  "⚡",
+  "🌈",
+  "🎵",
+  "🎶",
+  "📚",
+  "🔬",
+  "💻",
+  "🤖",
+  "😼",
+  "🦁",
+  "🐺",
+  "🦊",
+  "🐉",
+  "🌸",
+  "🍕",
+  "☕",
+  "🍷",
+  "🌍",
+];
 
 function loadMessages(): ChatMessage[] {
   try {
@@ -73,7 +147,7 @@ function renderContent(content: string) {
     return (
       <span key={key}>
         {part.split("\n").map((line, j, arr) => (
-          // biome-ignore lint/suspicious/noArrayIndexKey: line index is stable
+          // biome-ignore lint/suspicious/noArrayIndexKey: stable index
           <span key={`${key}-${j}`}>
             {line}
             {j < arr.length - 1 ? <br /> : null}
@@ -141,9 +215,12 @@ export default function ChatPanel() {
   const [input, setInput] = useState("");
   const [isThinking, setIsThinking] = useState(false);
   const [showTimeline, setShowTimeline] = useState(false);
+  const [showEmoji, setShowEmoji] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
   const avatarInputRef = useRef<HTMLInputElement>(null);
+  const sentryAvatarInputRef = useRef<HTMLInputElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const msgCountRef = useRef(0);
 
   const { data: globalMemories = [] } = useGetMemories(true);
@@ -151,16 +228,16 @@ export default function ChatPanel() {
   const { data: rules = [] } = useGetRules();
   const { data: personality = DEFAULT_PERSONALITY } = useGetPersonality();
   const { data: timeline = [] } = useGetTimeline();
-  const { data: userProfile } = useGetCallerUserProfile();
+  const { data: currentUsername = "USER" } = useGetCurrentUser();
+  const { data: userAvatarUrl = "" } = useGetUserAvatar();
+  const { data: sentryAvatarUrl = "" } = useGetSentryAvatar();
 
   const addMemory = useAddMemory();
   const addRule = useAddRule();
   const addTimeline = useAddTimelineEntry();
   const updatePersonality = useUpdatePersonality();
   const setUserAvatar = useSetUserAvatar();
-
-  const username = userProfile?.username || "USER";
-  const userAvatarUrl = userProfile?.avatarUrl || "";
+  const setSentryAvatar = useSetSentryAvatar();
 
   useEffect(() => {
     const id = setInterval(() => {
@@ -171,9 +248,8 @@ export default function ChatPanel() {
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: scroll trigger
   useEffect(() => {
-    if (scrollRef.current) {
+    if (scrollRef.current)
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
   }, [messages.length, isThinking]);
 
   const addMessage = useCallback(
@@ -193,12 +269,13 @@ export default function ChatPanel() {
     const text = input.trim();
     if (!text) return;
     setInput("");
+    setShowEmoji(false);
     msgCountRef.current++;
 
     addMessage({
       role: "user",
       content: text,
-      name: username,
+      name: currentUsername,
       avatarUrl: userAvatarUrl,
     });
     setIsThinking(true);
@@ -220,7 +297,7 @@ export default function ChatPanel() {
         });
         addMessage({
           role: "sentry",
-          content: `Knowledge stored in global memory.\n\n*"${fact}"*\n\nConcepts extracted: ${concepts.join(", ") || "none"}`,
+          content: `Knowledge stored.\n\n*"${fact}"*\n\nConcepts extracted: ${concepts.join(", ") || "none"}`,
           commandType: "teach",
           highlightedNodeIds: [id],
         });
@@ -234,7 +311,7 @@ export default function ChatPanel() {
         const id = await addRule.mutateAsync({ condition, effect });
         addMessage({
           role: "sentry",
-          content: `Cause-effect rule recorded.\n\n**IF** *${condition}* **THEN** *${effect}*\n\nI can now reason about this relationship.`,
+          content: `Cause-effect rule recorded.\n\n**IF** *${condition}* **THEN** *${effect}*`,
           commandType: "rule",
           highlightedNodeIds: [id],
         });
@@ -249,7 +326,7 @@ export default function ChatPanel() {
         });
         addMessage({
           role: "sentry",
-          content: `Timeline entry recorded.\n\n*"${event}"*\n\nThis event has been added to my historical record.`,
+          content: `Timeline entry recorded.\n\n*"${event}"*`,
           commandType: "history",
           highlightedNodeIds: [id],
         });
@@ -266,7 +343,7 @@ export default function ChatPanel() {
         });
         addMessage({
           role: "sentry",
-          content: `Personal memory stored.\n\n*"${memory}"*\n\nI will remember this about you.`,
+          content: `Personal memory stored.\n\n*"${memory}"*`,
           commandType: "remember",
           highlightedNodeIds: [id],
         });
@@ -281,16 +358,48 @@ export default function ChatPanel() {
       }
 
       if (lower === "who are you" || lower === "who are you?") {
-        const identityResponse = buildIdentityResponse(
-          personality,
-          timeline.length,
-        );
         addMessage({
           role: "sentry",
-          content: identityResponse,
+          content: buildIdentityResponse(personality, timeline.length),
           commandType: "identity",
         });
         return;
+      }
+
+      // Natural language concept detection
+      const detected = detectConceptsFromNaturalLanguage(text);
+
+      for (const rule of detected.rules) {
+        await addRule
+          .mutateAsync({ condition: rule.condition, effect: rule.effect })
+          .catch(() => {});
+      }
+      for (const pf of detected.personalFacts) {
+        const factText = `${pf.subject} ${pf.predicate} ${pf.object}`;
+        await addMemory
+          .mutateAsync({
+            text: factText,
+            memoryType: "personal",
+            concepts: [pf.object.split(" ")[0]],
+            isGlobal: false,
+          })
+          .catch(() => {});
+      }
+      if (detected.isTeaching) {
+        for (const fact of detected.facts) {
+          const concepts = fact
+            .split(" ")
+            .filter((w) => w.length > 4)
+            .slice(0, 5);
+          await addMemory
+            .mutateAsync({
+              text: fact,
+              memoryType: "knowledge",
+              concepts,
+              isGlobal: true,
+            })
+            .catch(() => {});
+        }
       }
 
       await new Promise((res) => setTimeout(res, 600 + Math.random() * 600));
@@ -301,6 +410,7 @@ export default function ChatPanel() {
         rules,
         personality,
         msgCountRef.current,
+        detected,
       );
 
       if (Object.keys(personalityDelta).length > 0) {
@@ -324,13 +434,20 @@ export default function ChatPanel() {
         else if (file.type.startsWith("image/")) type = "image";
         else if (file.type.startsWith("audio/")) type = "audio";
         else if (file.type.startsWith("video/")) type = "video";
+
         addMessage({
           role: "user",
-          name: username,
+          name: currentUsername,
           avatarUrl: userAvatarUrl,
           content: "",
           attachments: [{ type, url, name: file.name, mimeType: file.type }],
         });
+        setTimeout(() => {
+          addMessage({
+            role: "sentry",
+            content: interpretMediaAttachment(type, file.name, file.type),
+          });
+        }, 400);
       };
       reader.readAsDataURL(file);
     }
@@ -342,14 +459,18 @@ export default function ChatPanel() {
     if (!url) return;
     addMessage({
       role: "user",
-      name: username,
+      name: currentUsername,
       avatarUrl: userAvatarUrl,
       content: "",
       attachments: [{ type: "link", url, name: url }],
     });
+    setTimeout(
+      () => addMessage({ role: "sentry", content: interpretLink(url) }),
+      400,
+    );
   };
 
-  const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleUserAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
@@ -364,6 +485,40 @@ export default function ChatPanel() {
     };
     reader.readAsDataURL(file);
     e.target.value = "";
+  };
+
+  const handleSentryAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      const dataUrl = ev.target?.result as string;
+      try {
+        await setSentryAvatar.mutateAsync(dataUrl);
+        toast.success("Sentry avatar updated.");
+      } catch {
+        toast.error("Failed to update.");
+      }
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  };
+
+  const insertEmoji = (emoji: string) => {
+    const ta = textareaRef.current;
+    if (!ta) {
+      setInput((v) => v + emoji);
+      return;
+    }
+    const start = ta.selectionStart ?? input.length;
+    const end = ta.selectionEnd ?? input.length;
+    const newVal = input.slice(0, start) + emoji + input.slice(end);
+    setInput(newVal);
+    setTimeout(() => {
+      ta.selectionStart = start + emoji.length;
+      ta.selectionEnd = start + emoji.length;
+      ta.focus();
+    }, 0);
   };
 
   return (
@@ -391,11 +546,12 @@ export default function ChatPanel() {
                 NEURAL INTERFACE READY
               </p>
               <p className="text-[10px] font-mono text-muted-foreground/40 mt-2">
-                type a message or use TEACH: to begin
+                type a message to begin
               </p>
             </div>
           </div>
         )}
+
         <AnimatePresence initial={false}>
           {messages.map((msg) => (
             <motion.div
@@ -403,46 +559,65 @@ export default function ChatPanel() {
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.25 }}
-              className={`flex gap-3 ${msg.role === "user" ? "flex-row-reverse" : "flex-row"}`}
+              className="flex gap-3 flex-row"
             >
               <button
                 type="button"
-                className={`shrink-0 w-8 h-8 rounded-full border overflow-hidden cursor-pointer p-0 ${msg.role === "user" ? "border-gold/30" : "border-gold/50"}`}
-                onClick={
-                  msg.role === "user"
-                    ? () => avatarInputRef.current?.click()
-                    : undefined
-                }
+                className={`shrink-0 w-8 h-8 rounded-full border overflow-hidden cursor-pointer p-0 ${
+                  msg.role === "user" ? "border-gold/30" : "border-gold/50"
+                }`}
+                onClick={() => {
+                  if (msg.role === "user") avatarInputRef.current?.click();
+                  else sentryAvatarInputRef.current?.click();
+                }}
                 aria-label={
-                  msg.role === "user" ? "Change user avatar" : "Sentry avatar"
+                  msg.role === "user"
+                    ? "Change user avatar"
+                    : "Change Sentry avatar"
                 }
                 data-ocid={
-                  msg.role === "user" ? "avatar.upload_button" : undefined
+                  msg.role === "user"
+                    ? "avatar.upload_button"
+                    : "sentry_avatar.upload_button"
                 }
               >
-                {msg.avatarUrl ? (
+                {msg.role === "user" ? (
+                  userAvatarUrl ? (
+                    <img
+                      src={userAvatarUrl}
+                      alt={msg.name}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center bg-secondary text-gold">
+                      <User className="w-4 h-4" />
+                    </div>
+                  )
+                ) : sentryAvatarUrl ? (
                   <img
-                    src={msg.avatarUrl}
-                    alt={msg.name}
+                    src={sentryAvatarUrl}
+                    alt="Sentry"
                     className="w-full h-full object-cover"
                   />
                 ) : (
-                  <div
-                    className={`w-full h-full flex items-center justify-center text-xs font-mono ${msg.role === "user" ? "bg-secondary text-gold" : "bg-gold/10 text-gold"}`}
-                  >
-                    {msg.role === "user" ? <User className="w-4 h-4" /> : "S"}
+                  <div className="w-full h-full flex items-center justify-center bg-gold/10 text-gold text-xs font-mono">
+                    S
                   </div>
                 )}
               </button>
 
-              <div
-                className={`flex flex-col gap-0.5 max-w-[80%] ${msg.role === "user" ? "items-end" : "items-start"}`}
-              >
+              <div className="flex flex-col gap-0.5 max-w-[80%] items-start">
                 <div className="flex items-center gap-2">
                   <span
-                    className={`text-[10px] font-mono tracking-widest ${msg.role === "sentry" ? "text-gold" : "text-muted-foreground"}`}
+                    className={`text-[10px] font-mono tracking-widest ${
+                      msg.role === "sentry"
+                        ? "text-gold"
+                        : "text-muted-foreground"
+                    }`}
                   >
-                    {msg.role === "sentry" ? "SENTRY" : msg.name || "USER"}
+                    {msg.role === "sentry"
+                      ? "SENTRY"
+                      : (msg.name || "USER").toUpperCase()}
                   </span>
                   <span className="text-[9px] text-muted-foreground/50 font-mono">
                     {new Date(msg.timestamp).toLocaleTimeString()}
@@ -467,7 +642,7 @@ export default function ChatPanel() {
                   <div
                     className={`px-3 py-2 rounded-lg text-sm leading-relaxed transition-all ${
                       msg.role === "user"
-                        ? "bg-secondary text-foreground"
+                        ? "bg-secondary/80 border border-gold/10 text-foreground"
                         : "sentry-message text-foreground"
                     }`}
                   >
@@ -534,6 +709,30 @@ export default function ChatPanel() {
         onHighlightNodes={() => {}}
       />
 
+      {/* Emoji picker */}
+      {showEmoji && (
+        <div
+          className="absolute bottom-[88px] left-4 z-20 bg-card border border-gold/40 rounded-lg p-3 shadow-2xl"
+          style={{ width: 280 }}
+        >
+          <div className="flex flex-wrap gap-1">
+            {EMOJI_LIST.map((emoji) => (
+              <button
+                key={emoji}
+                type="button"
+                className="text-xl hover:scale-125 transition-transform w-8 h-8 flex items-center justify-center rounded hover:bg-gold/10"
+                onClick={() => {
+                  insertEmoji(emoji);
+                  setShowEmoji(false);
+                }}
+              >
+                {emoji}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="px-4 pb-4 pt-2 shrink-0 border-t border-border">
         <div className="flex gap-2 items-end">
           <Button
@@ -545,10 +744,20 @@ export default function ChatPanel() {
           >
             <Paperclip className="w-4 h-4" />
           </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="w-8 h-8 shrink-0 text-muted-foreground hover:text-gold"
+            onClick={() => setShowEmoji((v) => !v)}
+            data-ocid="chat.toggle"
+          >
+            <SmilePlus className="w-4 h-4" />
+          </Button>
           <Textarea
+            ref={textareaRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Send a message or use TEACH: / IF...THEN... / WHY..."
+            placeholder="Send a message, share a fact, or just chat..."
             className="flex-1 min-h-[40px] max-h-32 resize-none bg-input border-border text-sm font-mono text-foreground placeholder:text-muted-foreground"
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
@@ -597,7 +806,14 @@ export default function ChatPanel() {
         type="file"
         accept="image/*"
         className="hidden"
-        onChange={handleAvatarChange}
+        onChange={handleUserAvatarChange}
+      />
+      <input
+        ref={sentryAvatarInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={handleSentryAvatarChange}
       />
     </div>
   );

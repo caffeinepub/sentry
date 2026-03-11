@@ -1,3 +1,9 @@
+/**
+ * useQueries — hybrid data layer.
+ *
+ * ICP canister (actor):  global memories, rules, knowledge edges, sentry avatar
+ * localStorage (localDB): user memories, personality, timeline, user avatar
+ */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   KnowledgeEdge,
@@ -7,7 +13,36 @@ import type {
   TimelineEntry,
   UserProfile,
 } from "../backend.d";
+import { getCurrentUser } from "../utils/localAuth";
+import {
+  addUserMemory,
+  addTimelineEntry as dbAddTimeline,
+  getPersonality as dbGetPersonality,
+  getTimeline as dbGetTimeline,
+  getUserMemories as dbGetUserMemories,
+  setUserAvatar as dbSetUserAvatar,
+  updatePersonality as dbUpdatePersonality,
+  deleteUserMemory,
+  getUserAvatar,
+  updateUserMemory,
+} from "../utils/localDB";
 import { useActor } from "./useActor";
+
+function user(): string {
+  return getCurrentUser() || "guest";
+}
+
+// ── Auth helper ────────────────────────────────────────────────────────────────
+
+export function useGetCurrentUser() {
+  return useQuery<string>({
+    queryKey: ["currentUser"],
+    queryFn: () => getCurrentUser() || "",
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+}
+
+// ── ICP: Global memories ───────────────────────────────────────────────────────
 
 export function useGetMemories(isGlobal: boolean) {
   const { actor, isFetching } = useActor();
@@ -21,17 +56,16 @@ export function useGetMemories(isGlobal: boolean) {
   });
 }
 
+// ── localStorage: User memories ────────────────────────────────────────────────
+
 export function useGetUserMemories() {
-  const { actor, isFetching } = useActor();
   return useQuery<Memory[]>({
-    queryKey: ["userMemories"],
-    queryFn: async () => {
-      if (!actor) return [];
-      return actor.getUserMemories();
-    },
-    enabled: !!actor && !isFetching,
+    queryKey: ["userMemories", user()],
+    queryFn: () => dbGetUserMemories(user()),
   });
 }
+
+// ── ICP: Rules ─────────────────────────────────────────────────────────────────
 
 export function useGetRules() {
   const { actor, isFetching } = useActor();
@@ -45,29 +79,25 @@ export function useGetRules() {
   });
 }
 
+// ── localStorage: Personality ──────────────────────────────────────────────────
+
 export function useGetPersonality() {
-  const { actor, isFetching } = useActor();
   return useQuery<PersonalityProfile>({
-    queryKey: ["personality"],
-    queryFn: async () => {
-      if (!actor) return { curiosity: 0.5, friendliness: 0.5, analytical: 0.5 };
-      return actor.getPersonality();
-    },
-    enabled: !!actor && !isFetching,
+    queryKey: ["personality", user()],
+    queryFn: () => dbGetPersonality(user()),
   });
 }
 
+// ── localStorage: Timeline ─────────────────────────────────────────────────────
+
 export function useGetTimeline() {
-  const { actor, isFetching } = useActor();
   return useQuery<TimelineEntry[]>({
-    queryKey: ["timeline"],
-    queryFn: async () => {
-      if (!actor) return [];
-      return actor.getTimeline();
-    },
-    enabled: !!actor && !isFetching,
+    queryKey: ["timeline", user()],
+    queryFn: () => dbGetTimeline(user()),
   });
 }
+
+// ── ICP: Knowledge edges ───────────────────────────────────────────────────────
 
 export function useGetKnowledgeEdges() {
   const { actor, isFetching } = useActor();
@@ -81,23 +111,7 @@ export function useGetKnowledgeEdges() {
   });
 }
 
-export function useGetCallerUserProfile() {
-  const { actor, isFetching: actorFetching } = useActor();
-  const query = useQuery<UserProfile | null>({
-    queryKey: ["currentUserProfile"],
-    queryFn: async () => {
-      if (!actor) throw new Error("Actor not available");
-      return actor.getCallerUserProfile();
-    },
-    enabled: !!actor && !actorFetching,
-    retry: false,
-  });
-  return {
-    ...query,
-    isLoading: actorFetching || query.isLoading,
-    isFetched: !!actor && query.isFetched,
-  };
-}
+// ── ICP: Sentry avatar ─────────────────────────────────────────────────────────
 
 export function useGetSentryAvatar() {
   const { actor, isFetching } = useActor();
@@ -111,6 +125,37 @@ export function useGetSentryAvatar() {
   });
 }
 
+// ── localStorage: User avatar ──────────────────────────────────────────────────
+
+export function useGetUserAvatar() {
+  const u = user();
+  return useQuery<string>({
+    queryKey: ["userAvatar", u],
+    queryFn: () => getUserAvatar(u),
+  });
+}
+
+// ── localStorage: Caller user profile (built from localDB) ────────────────────
+
+export function useGetCallerUserProfile() {
+  const u = user();
+  const { data: avatarUrl = "" } = useGetUserAvatar();
+  const profile: UserProfile = {
+    username: u,
+    avatarUrl,
+    personality: dbGetPersonality(u),
+    principalId: u,
+  };
+  return {
+    data: u ? profile : null,
+    isLoading: false,
+    isFetched: true,
+  };
+}
+
+// ── MUTATIONS ─────────────────────────────────────────────────────────────────
+
+/** Add memory: global → ICP actor; user → localStorage */
 export function useAddMemory() {
   const { actor } = useActor();
   const qc = useQueryClient();
@@ -121,12 +166,20 @@ export function useAddMemory() {
       concepts: string[];
       isGlobal: boolean;
     }) => {
-      if (!actor) throw new Error("Not connected");
-      return actor.addMemory(
+      if (params.isGlobal) {
+        if (!actor) throw new Error("Actor not ready");
+        return actor.addMemory(
+          params.text,
+          params.memoryType,
+          params.concepts,
+          true,
+        );
+      }
+      return addUserMemory(
+        user(),
         params.text,
         params.memoryType,
         params.concepts,
-        params.isGlobal,
       );
     },
     onSuccess: () => {
@@ -136,13 +189,22 @@ export function useAddMemory() {
   });
 }
 
+/** Delete memory: global → ICP actor; user memory → localStorage */
 export function useDeleteMemory() {
   const { actor } = useActor();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (id: bigint) => {
-      if (!actor) throw new Error("Not connected");
-      return actor.deleteMemory(id);
+    mutationFn: async (params: { id: bigint; isGlobal?: boolean }) => {
+      if (params.isGlobal !== false && actor) {
+        // Try actor first for global memories
+        try {
+          return await actor.deleteMemory(params.id);
+        } catch {
+          // Fall through to localStorage
+        }
+      }
+      deleteUserMemory(user(), params.id);
+      return true;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["memories"] });
@@ -151,93 +213,104 @@ export function useDeleteMemory() {
   });
 }
 
+/** Update memory text — only user memories (localStorage) can be edited */
+export function useUpdateMemory() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (params: { id: bigint; text: string }) => {
+      updateUserMemory(user(), params.id, params.text);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["userMemories"] });
+    },
+  });
+}
+
+/** Add rule → ICP actor */
 export function useAddRule() {
   const { actor } = useActor();
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (params: { condition: string; effect: string }) => {
-      if (!actor) throw new Error("Not connected");
+      if (!actor) throw new Error("Actor not ready");
       return actor.addRule(params.condition, params.effect);
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["rules"] }),
   });
 }
 
+/** Delete rule → ICP actor */
 export function useDeleteRule() {
   const { actor } = useActor();
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: bigint) => {
-      if (!actor) throw new Error("Not connected");
+      if (!actor) throw new Error("Actor not ready");
       return actor.deleteRule(id);
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["rules"] }),
   });
 }
 
+/** Add timeline entry → localStorage per user */
 export function useAddTimelineEntry() {
-  const { actor } = useActor();
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (params: {
       event: string;
       personalitySnapshot: PersonalityProfile;
-    }) => {
-      if (!actor) throw new Error("Not connected");
-      return actor.addTimelineEntry(params.event, params.personalitySnapshot);
-    },
+    }) => dbAddTimeline(user(), params.event, params.personalitySnapshot),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["timeline"] }),
   });
 }
 
+/** Update personality → localStorage per user */
 export function useUpdatePersonality() {
-  const { actor } = useActor();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (p: PersonalityProfile) => {
-      if (!actor) throw new Error("Not connected");
-      return actor.updatePersonality(p.curiosity, p.friendliness, p.analytical);
-    },
+    mutationFn: async (p: PersonalityProfile) => dbUpdatePersonality(user(), p),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["personality"] }),
   });
 }
 
+/** Set user avatar → localStorage per user */
 export function useSetUserAvatar() {
-  const { actor } = useActor();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (url: string) => {
-      if (!actor) throw new Error("Not connected");
-      return actor.setUserAvatar(url);
-    },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["currentUserProfile"] }),
+    mutationFn: async (url: string) => dbSetUserAvatar(user(), url),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["userAvatar"] }),
   });
 }
 
+/** Set sentry avatar → ICP actor */
 export function useSetSentryAvatar() {
   const { actor } = useActor();
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (url: string) => {
-      if (!actor) throw new Error("Not connected");
+      if (!actor) throw new Error("Actor not ready");
       return actor.setSentryAvatar(url);
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["sentryAvatar"] }),
   });
 }
 
+/** Save caller user profile → localStorage */
 export function useSaveCallerUserProfile() {
-  const { actor } = useActor();
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (profile: UserProfile) => {
-      if (!actor) throw new Error("Not connected");
-      return actor.saveCallerUserProfile(profile);
+      dbSetUserAvatar(profile.principalId || user(), profile.avatarUrl);
+      dbUpdatePersonality(profile.principalId || user(), profile.personality);
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["currentUserProfile"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["userAvatar"] });
+      qc.invalidateQueries({ queryKey: ["personality"] });
+    },
   });
 }
 
+/** Add knowledge edge → ICP actor */
 export function useAddKnowledgeEdge() {
   const { actor } = useActor();
   const qc = useQueryClient();
@@ -247,7 +320,7 @@ export function useAddKnowledgeEdge() {
       toId: bigint;
       relationType: string;
     }) => {
-      if (!actor) throw new Error("Not connected");
+      if (!actor) throw new Error("Actor not ready");
       return actor.addKnowledgeEdge(
         params.fromId,
         params.toId,
@@ -258,11 +331,13 @@ export function useAddKnowledgeEdge() {
   });
 }
 
+// ── Import / Export ────────────────────────────────────────────────────────────
+
 export function useExportUserData() {
   const { actor } = useActor();
   return useMutation({
     mutationFn: async () => {
-      if (!actor) throw new Error("Not connected");
+      if (!actor) throw new Error("Actor not ready");
       return actor.exportUserData();
     },
   });
@@ -272,7 +347,7 @@ export function useExportGlobalData() {
   const { actor } = useActor();
   return useMutation({
     mutationFn: async () => {
-      if (!actor) throw new Error("Not connected");
+      if (!actor) throw new Error("Actor not ready");
       return actor.exportGlobalData();
     },
   });
@@ -283,12 +358,10 @@ export function useImportUserData() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (jsonData: string) => {
-      if (!actor) throw new Error("Not connected");
+      if (!actor) throw new Error("Actor not ready");
       return actor.importUserData(jsonData);
     },
-    onSuccess: () => {
-      qc.invalidateQueries();
-    },
+    onSuccess: () => qc.invalidateQueries(),
   });
 }
 
@@ -297,11 +370,9 @@ export function useImportGlobalData() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (jsonData: string) => {
-      if (!actor) throw new Error("Not connected");
+      if (!actor) throw new Error("Actor not ready");
       return actor.importGlobalData(jsonData);
     },
-    onSuccess: () => {
-      qc.invalidateQueries();
-    },
+    onSuccess: () => qc.invalidateQueries(),
   });
 }

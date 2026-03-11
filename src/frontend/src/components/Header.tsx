@@ -1,32 +1,25 @@
 import { Button } from "@/components/ui/button";
-import { useQueryClient } from "@tanstack/react-query";
-import { Cpu, HelpCircle, Settings } from "lucide-react";
-import { useInternetIdentity } from "../hooks/useInternetIdentity";
+import { Cpu, HelpCircle, LogOut, Settings, Users } from "lucide-react";
+import { getCurrentUser, logout } from "../utils/localAuth";
 
 interface HeaderProps {
   onHelpOpen: () => void;
   onSettingsOpen: () => void;
+  onUserManagement: () => void;
+  onLogout: () => void;
 }
 
-export default function Header({ onHelpOpen, onSettingsOpen }: HeaderProps) {
-  const { login, clear, loginStatus, identity } = useInternetIdentity();
-  const queryClient = useQueryClient();
-  const isAuthenticated = !!identity;
+export default function Header({
+  onHelpOpen,
+  onSettingsOpen,
+  onUserManagement,
+  onLogout,
+}: HeaderProps) {
+  const username = getCurrentUser() || "";
 
-  const handleAuth = async () => {
-    if (isAuthenticated) {
-      await clear();
-      queryClient.clear();
-    } else {
-      try {
-        await login();
-      } catch (err: any) {
-        if (err?.message === "User is already authenticated") {
-          await clear();
-          setTimeout(() => login(), 300);
-        }
-      }
-    }
+  const handleLogout = () => {
+    logout();
+    onLogout();
   };
 
   return (
@@ -46,6 +39,11 @@ export default function Header({ onHelpOpen, onSettingsOpen }: HeaderProps) {
       </div>
 
       <div className="flex items-center gap-1">
+        {username && (
+          <span className="text-[10px] font-mono text-gold/70 tracking-widest mr-2 hidden sm:inline">
+            AGENT: {username.toUpperCase()}
+          </span>
+        )}
         <Button
           variant="ghost"
           size="icon"
@@ -64,22 +62,26 @@ export default function Header({ onHelpOpen, onSettingsOpen }: HeaderProps) {
         >
           <Settings className="w-4 h-4" />
         </Button>
-        <button
-          type="button"
-          onClick={handleAuth}
-          disabled={loginStatus === "logging-in"}
-          className={`ml-1 px-3 py-1 text-xs font-mono rounded border transition-all ${
-            isAuthenticated
-              ? "border-gold/40 text-gold hover:border-gold hover:bg-gold/10"
-              : "border-muted-foreground/30 text-muted-foreground hover:border-gold hover:text-gold"
-          } disabled:opacity-50`}
+        <Button
+          variant="ghost"
+          size="icon"
+          className="text-muted-foreground hover:text-gold w-8 h-8"
+          onClick={onUserManagement}
+          title="Manage agents"
+          data-ocid="user_management.open_modal_button"
         >
-          {loginStatus === "logging-in"
-            ? "CONNECTING..."
-            : isAuthenticated
-              ? "DISCONNECT"
-              : "CONNECT"}
-        </button>
+          <Users className="w-4 h-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="text-muted-foreground hover:text-destructive w-8 h-8"
+          onClick={handleLogout}
+          title="Logout"
+          data-ocid="logout.button"
+        >
+          <LogOut className="w-4 h-4" />
+        </Button>
       </div>
     </header>
   );

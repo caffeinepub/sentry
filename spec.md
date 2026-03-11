@@ -1,78 +1,53 @@
-# Sentry
+# Sentry v3 — Local Auth, Enhanced AI, Emoji/GIF, Media Interpretation
 
 ## Current State
-New project with no existing code.
+- App uses Internet Identity (ICP) for authentication, which opens external browser popups
+- Chat uses explicit command prefixes (TEACH:, IF...THEN..., REMEMBER:, HISTORY:, WHY) only
+- Avatar images appear to the right (user bubbles) and left (sentry bubbles) but layout needs polish
+- No emoji picker — users can paste emojis but no picker UI
+- No link/media content interpretation feedback from AI
+- No chat history clear button currently, but the feature should be explicitly removed
+- Memory Explorer has search + delete in a side panel
+- 3D Brain visualization exists
+- Personality system, Timeline, Import/Export all exist
 
 ## Requested Changes (Diff)
 
 ### Add
-- Full-stack AI teaching & chat application named "Sentry"
-- Black and gold visual theme
-- Chat interface with user and AI message bubbles, each with uploadable icon images (avatars) shown to the left of messages with names
-- File upload support: images, GIFs, files, audio, video, and links embedded in chat
-- Special teaching commands parsed from chat input:
-  - `TEACH: <fact>` — store general knowledge
-  - `IF <condition> THEN <effect>` — store cause-effect rules
-  - `HISTORY: <event>` — teach AI its own history
-  - `REMEMBER: <memory>` — store key memories
-  - `WHY <query>` — trigger reasoning chain explanation
-  - `WHO ARE YOU` — display AI identity and personality
-- Semantic memory recall: AI surfaces relevant past messages/concepts in responses
-- Memory Explorer panel: searchable and filterable list of stored memories, click to view in chat
-- Auto semantic linking: related concepts linked in knowledge graph, similar concepts merged
-- Rules storage: cause-effect statements with multi-step chaining and reverse reasoning
-- 3D Brain Visualization using React Three Fiber / Three.js:
-  - Rotatable sphere of nodes representing concepts
-  - Nodes colored by type (memory=blue/gold, rule=orange, both=green)
-  - Nodes highlighted/scaled on hover or when active in conversation
-  - Animated edges between related nodes
-  - Animated link colors for active reasoning chains
-  - Hover tooltip showing concept name
-  - Auto-layout algorithm spacing nodes on a sphere
-- Personality system with three dimensions: Curiosity, Friendliness, Analytical
-  - Grows based on user messages, emotional tone, AI reasoning activity
-  - Influences response type, empathy, curiosity prompts
-  - Emotion awareness adjusts personality/responses
-- Timeline & History panel:
-  - Chronological list of AI history events and interactions
-  - Personality snapshot per timeline entry
-  - Timeline selection highlights nodes in 3D brain
-- Separate Import/Export controls:
-  - User data (personality, personal history, opinions) — separate from global data
-  - Global data (knowledge, rules, shared memories) — separate export/import
-- Help button opening a teaching manual modal explaining all commands and features
-- Auto-save to backend every 30 seconds + localStorage fallback
-- Self-reflection: AI periodically highlights relevant concepts from history
-- Curiosity-driven prompts: AI occasionally asks follow-up questions
+- **Local Username/Password Auth System**: Replace Internet Identity entirely. Hardcode two initial accounts: Unity/Bacon and Syndelious/Leviathan. Store credentials in localStorage. Login form replaces the CONNECT button flow.
+- **User Management Panel**: Both authenticated users can add/remove usernames+passwords. Search by username to find and remove accounts.
+- **localStorage-based Data Layer**: Since no ICP actor will be authenticated, rewrite all data hooks (memories, rules, personality, timeline, knowledge edges) to use localStorage directly. Keep actor calls as no-op stubs.
+- **Natural Language Concept Detection**: AI auto-detects in any message: teaching facts, if/then rules, date/time references (today, yesterday, specific dates), self-identity statements ("I am", "I like", "you are"), and stores them automatically without requiring command prefixes. Show a subtle badge when a concept was auto-extracted.
+- **Emoji Picker**: A button next to the input that opens an emoji picker grid (basic set, no external library needed — render emoji characters directly). Also support GIF display when a .gif URL is pasted or gif file is uploaded.
+- **Media/Link Interpretation**: When a user uploads an image, video, audio, or file, or pastes a link, Sentry generates an interpretive AI response describing what it "perceives" from the attachment (simulated analysis). For links: fetch page title if possible via a simple heuristic, then describe the URL. For images: describe type and context. For audio/video: acknowledge and prompt for context.
+- **Avatar display left of messages**: All messages (user and sentry) show avatar on the LEFT side, with name above. Remove right-aligned user messages — use left-aligned layout for all with color distinction instead.
 
 ### Modify
-- Nothing (new project)
+- **Header**: Remove Internet Identity connect/disconnect button. Show logged-in username in header. Add logout button. Add user management button (gear/admin icon).
+- **App.tsx**: Replace `isAuthenticated` check (based on ICP identity) with local auth state from localStorage.
+- **ChatPanel**: 
+  - Remove any clear chat history button or ability
+  - Add emoji picker toggle button
+  - Add link paste detection with AI interpretation
+  - Enhanced `handleSend` with natural language NLP detection before explicit command checks
+- **aiEngine.ts**: Add `detectConceptsFromNaturalLanguage()` function that scans for: dates, "I am/like", "you are/like", teaching statements, if/then patterns regardless of capitalization/order
+- **MemoryExplorer**: Memory tab remains, but no conversation search — memories only. Edit support: click memory text to inline-edit before saving.
+- **useQueries.ts**: Rewrite to use localStorage-backed store instead of ICP actor calls
 
 ### Remove
-- Nothing (new project)
+- Internet Identity (`useInternetIdentity`) from auth flow — replaced by local auth
+- ICP CONNECT/DISCONNECT button in Header
+- ProfileSetup dialog (replaced by login form)
+- Any clear chat history functionality
 
 ## Implementation Plan
-1. Backend (Motoko):
-   - `Memory` type: id, text, type (knowledge/rule/history/remember), concepts[], timestamp, userId
-   - `Rule` type: id, condition, effect, timestamp
-   - `PersonalityProfile` type: curiosity, friendliness, analytical (0.0–1.0 floats)
-   - `TimelineEntry` type: id, event, timestamp, personalitySnapshot
-   - `UserProfile` type: userId, avatarUrl, personality, timelineEntries[]
-   - Global store: memories[], rules[], knowledgeGraph edges[]
-   - User store: per-principal personality, history, opinions
-   - CRUD APIs: addMemory, getMemories, addRule, getRules, updatePersonality, getPersonality, addTimelineEntry, getTimeline, setUserAvatar, setSentryAvatar
-   - Import/export endpoints for user data vs global data
-2. Frontend:
-   - Three-panel responsive layout: left=Memory Explorer, center=Chat, right=3D Brain
-   - Chat panel with message input, file upload button, send button
-   - Message bubbles with avatar image on left, name, timestamp, content
-   - Command parser for TEACH/IF-THEN/HISTORY/REMEMBER/WHY/WHO ARE YOU
-   - AI response engine using stored knowledge/rules/personality
-   - Memory Explorer with search input and type filter tabs
-   - 3D Brain with React Three Fiber: spherical node layout, animated edges, hover tooltips
-   - Personality bar showing three dimensions with animated growth
-   - Timeline panel toggle showing chronological events
-   - Import/Export UI: two separate sections (User Data, Global Data) with download/upload buttons
-   - Help modal with full teaching manual
-   - Avatar upload: click avatar to upload image, stored via blob-storage
-   - Black (#0a0a0a) and gold (#c9a227) color scheme throughout
+1. Create `src/utils/localDB.ts` — full localStorage CRUD for memories, rules, personality, timeline, edges, users, settings
+2. Create `src/utils/localAuth.ts` — credential management, login/logout, user CRUD
+3. Create `src/components/LoginScreen.tsx` — username/password login form
+4. Create `src/components/UserManagement.tsx` — search/add/remove accounts panel
+5. Rewrite `src/hooks/useQueries.ts` — use localDB instead of actor
+6. Update `src/utils/aiEngine.ts` — add natural language concept extractor
+7. Update `src/components/ChatPanel.tsx` — emoji picker, media interpretation, NLP detection, left-aligned layout
+8. Update `src/components/Header.tsx` — remove ICP auth, show username/logout
+9. Update `src/App.tsx` — use localAuth for auth gate
+10. Update `src/components/MemoryExplorer.tsx` — add inline edit
