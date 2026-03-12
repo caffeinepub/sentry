@@ -290,7 +290,7 @@ export default function UserManagement({ open, onClose }: UserManagementProps) {
               className="h-8 bg-input border-border text-xs font-mono"
             />
             <Button
-              className="w-full h-8 bg-gold/10 border border-gold/40 text-gold hover:bg-gold/20 text-xs font-mono tracking-widest"
+              className="w-full h-8 bg-gold border border-gold text-black font-bold hover:bg-gold-bright text-xs font-mono tracking-widest"
               variant="ghost"
               onClick={handleAdd}
               data-ocid="user_management.primary_button"

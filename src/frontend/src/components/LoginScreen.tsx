@@ -75,7 +75,7 @@ export default function LoginScreen({ onLogin }: LoginScreenProps) {
           <motion.div
             animate={{ scale: [1, 1.05, 1] }}
             transition={{ duration: 3, repeat: Number.POSITIVE_INFINITY }}
-            className="w-20 h-20 rounded-full border-2 border-gold/50 flex items-center justify-center mb-4 gold-glow"
+            className="w-20 h-20 rounded-full border-2 border-gold flex items-center justify-center mb-4 gold-glow"
             style={{ background: "oklch(0.08 0.004 85)" }}
           >
             <Brain className="w-10 h-10 text-gold" />
@@ -83,7 +83,7 @@ export default function LoginScreen({ onLogin }: LoginScreenProps) {
           <h1 className="font-display font-black text-4xl tracking-[0.4em] text-gold gold-glow-text">
             SENTRY
           </h1>
-          <p className="text-[10px] font-mono text-muted-foreground tracking-[0.3em] mt-1">
+          <p className="text-[10px] font-mono text-gold/60 tracking-[0.3em] mt-1">
             ADAPTIVE NEURAL INTERFACE
           </p>
         </div>
@@ -105,7 +105,7 @@ export default function LoginScreen({ onLogin }: LoginScreenProps) {
                 setError("");
               }}
               autoComplete="username"
-              className="w-full bg-black border border-gold/30 text-gold font-mono text-sm px-4 py-3 rounded focus:outline-none focus:border-gold focus:ring-1 focus:ring-gold/30 placeholder:text-muted-foreground/30 transition-colors"
+              className="w-full bg-black border border-gold text-gold font-mono text-sm px-4 py-3 rounded focus:outline-none focus:border-gold focus:ring-1 focus:ring-gold/40 placeholder:text-gold/30 transition-colors"
               placeholder="Enter agent ID"
               data-ocid="login.input"
             />
@@ -126,7 +126,7 @@ export default function LoginScreen({ onLogin }: LoginScreenProps) {
                 setError("");
               }}
               autoComplete="current-password"
-              className="w-full bg-black border border-gold/30 text-gold font-mono text-sm px-4 py-3 rounded focus:outline-none focus:border-gold focus:ring-1 focus:ring-gold/30 placeholder:text-muted-foreground/30 transition-colors"
+              className="w-full bg-black border border-gold text-gold font-mono text-sm px-4 py-3 rounded focus:outline-none focus:border-gold focus:ring-1 focus:ring-gold/40 placeholder:text-gold/30 transition-colors"
               placeholder="Enter access code"
             />
           </div>
@@ -142,7 +142,7 @@ export default function LoginScreen({ onLogin }: LoginScreenProps) {
 
           <button
             type="submit"
-            className="w-full py-3 bg-gold/10 border border-gold/50 text-gold font-mono text-sm tracking-[0.2em] rounded hover:bg-gold/20 hover:border-gold transition-all gold-glow mt-2"
+            className="w-full py-3 bg-gold border-2 border-gold text-black font-bold font-mono text-sm tracking-[0.2em] rounded hover:bg-gold-bright transition-all gold-glow mt-2"
             data-ocid="login.submit_button"
           >
             AUTHENTICATE
@@ -151,11 +151,11 @@ export default function LoginScreen({ onLogin }: LoginScreenProps) {
 
         {/* Photo login */}
         <div className="my-6 flex items-center gap-3">
-          <div className="flex-1 h-px bg-gold/20" />
+          <div className="flex-1 h-px bg-gold/30" />
           <span className="text-[10px] font-mono text-gold/40 tracking-widest">
             OR
           </span>
-          <div className="flex-1 h-px bg-gold/20" />
+          <div className="flex-1 h-px bg-gold/30" />
         </div>
 
         <div className="space-y-3">
@@ -177,7 +177,7 @@ export default function LoginScreen({ onLogin }: LoginScreenProps) {
                 setPhotoUsername(e.target.value);
                 setPhotoError("");
               }}
-              className="w-full bg-black border border-gold/20 text-gold font-mono text-sm px-4 py-2.5 rounded focus:outline-none focus:border-gold/60 placeholder:text-muted-foreground/20 transition-colors"
+              className="w-full bg-black border border-gold text-gold font-mono text-sm px-4 py-2.5 rounded focus:outline-none focus:border-gold placeholder:text-gold/25 transition-colors"
               placeholder="Enter agent ID"
               data-ocid="login.photo_input"
             />
@@ -185,7 +185,7 @@ export default function LoginScreen({ onLogin }: LoginScreenProps) {
           <button
             type="button"
             onClick={() => photoInputRef.current?.click()}
-            className="w-full py-2.5 bg-black border border-gold/30 text-gold/70 font-mono text-xs tracking-[0.2em] rounded hover:bg-gold/10 hover:border-gold/50 hover:text-gold transition-all flex items-center justify-center gap-2"
+            className="w-full py-2.5 bg-gold border-2 border-gold text-black font-bold font-mono text-xs tracking-[0.2em] rounded hover:bg-gold-bright transition-all flex items-center justify-center gap-2"
             data-ocid="login.upload_button"
           >
             <Camera className="w-3.5 h-3.5" />
@@ -201,7 +201,7 @@ export default function LoginScreen({ onLogin }: LoginScreenProps) {
           )}
         </div>
 
-        <p className="text-center text-[10px] font-mono text-muted-foreground/30 mt-8 tracking-widest">
+        <p className="text-center text-[10px] font-mono text-gold/40 mt-8 tracking-widest">
           AUTHORIZED PERSONNEL ONLY
         </p>
       </motion.div>

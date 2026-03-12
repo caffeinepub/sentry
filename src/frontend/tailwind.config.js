@@ -25,9 +25,9 @@ export default {
         background: "oklch(var(--background))",
         foreground: "oklch(var(--foreground))",
         gold: {
-          DEFAULT: "oklch(var(--gold))",
-          bright: "oklch(var(--gold-bright))",
-          dim: "oklch(var(--gold-dim))",
+          DEFAULT: "oklch(var(--gold) / <alpha-value>)",
+          bright: "oklch(var(--gold-bright) / <alpha-value>)",
+          dim: "oklch(var(--gold-dim) / <alpha-value>)",
         },
         primary: {
           DEFAULT: "oklch(var(--primary) / <alpha-value>)",

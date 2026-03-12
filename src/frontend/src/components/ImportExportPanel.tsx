@@ -132,7 +132,7 @@ export default function ImportExportPanel({
             <div className="flex gap-2">
               <Button
                 variant="outline"
-                className="flex-1 border-gold/30 text-gold hover:bg-gold/10 font-mono text-xs"
+                className="flex-1 bg-gold border-gold text-black font-bold hover:bg-gold-bright font-mono text-xs"
                 onClick={handleExportUser}
                 disabled={exportUser.isPending}
                 data-ocid="user_data.export_button"
@@ -142,7 +142,7 @@ export default function ImportExportPanel({
               </Button>
               <Button
                 variant="outline"
-                className="flex-1 border-border text-muted-foreground hover:border-gold/30 hover:text-gold font-mono text-xs"
+                className="flex-1 border-gold/40 text-gold hover:bg-gold/10 font-mono text-xs"
                 onClick={() => userFileRef.current?.click()}
                 disabled={importUser.isPending}
                 data-ocid="user_data.upload_button"
@@ -175,7 +175,7 @@ export default function ImportExportPanel({
             <div className="flex gap-2">
               <Button
                 variant="outline"
-                className="flex-1 border-gold/30 text-gold hover:bg-gold/10 font-mono text-xs"
+                className="flex-1 bg-gold border-gold text-black font-bold hover:bg-gold-bright font-mono text-xs"
                 onClick={handleExportGlobal}
                 disabled={exportGlobal.isPending}
                 data-ocid="global_data.export_button"
@@ -185,7 +185,7 @@ export default function ImportExportPanel({
               </Button>
               <Button
                 variant="outline"
-                className="flex-1 border-border text-muted-foreground hover:border-gold/30 hover:text-gold font-mono text-xs"
+                className="flex-1 border-gold/40 text-gold hover:bg-gold/10 font-mono text-xs"
                 onClick={() => globalFileRef.current?.click()}
                 disabled={importGlobal.isPending}
                 data-ocid="global_data.upload_button"

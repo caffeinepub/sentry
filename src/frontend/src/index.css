@@ -29,17 +29,17 @@
 @layer base {
   :root {
     --background: 0.08 0.004 85;
-    --foreground: 0.94 0.008 85;
+    --foreground: 0.82 0.16 85;
     --card: 0.11 0.004 85;
-    --card-foreground: 0.94 0.008 85;
+    --card-foreground: 0.72 0.14 85;
     --popover: 0.1 0.004 85;
-    --popover-foreground: 0.94 0.008 85;
+    --popover-foreground: 0.72 0.14 85;
     --primary: 0.72 0.14 85;
     --primary-foreground: 0.1 0.005 85;
     --secondary: 0.16 0.006 85;
-    --secondary-foreground: 0.8 0.01 85;
+    --secondary-foreground: 0.72 0.14 85;
     --muted: 0.15 0.004 85;
-    --muted-foreground: 0.52 0.012 85;
+    --muted-foreground: 0.55 0.1 85;
     --accent: 0.82 0.16 85;
     --accent-foreground: 0.08 0.004 85;
     --destructive: 0.55 0.22 25;
@@ -54,7 +54,7 @@
     --chart-4: 0.65 0.14 120;
     --chart-5: 0.55 0.18 25;
     --sidebar: 0.1 0.004 85;
-    --sidebar-foreground: 0.94 0.008 85;
+    --sidebar-foreground: 0.72 0.14 85;
     --sidebar-primary: 0.72 0.14 85;
     --sidebar-primary-foreground: 0.1 0.005 85;
     --sidebar-accent: 0.16 0.006 85;
