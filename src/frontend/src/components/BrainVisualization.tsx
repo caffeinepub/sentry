@@ -94,13 +94,13 @@ function BrainNode({
         <Html distanceFactor={6} style={{ pointerEvents: "none" }}>
           <div
             style={{
-              background: "rgba(10,10,10,0.9)",
-              border: "1px solid rgba(201,162,39,0.6)",
+              background: "oklch(0.08 0.004 85 / 0.92)",
+              border: "1px solid oklch(0.72 0.14 85 / 0.6)",
               borderRadius: 4,
               padding: "3px 7px",
               fontSize: 10,
               fontFamily: "monospace",
-              color: "#c9a227",
+              color: "oklch(0.82 0.16 85)",
               whiteSpace: "nowrap",
               maxWidth: 180,
               overflow: "hidden",

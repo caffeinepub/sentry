@@ -1133,7 +1133,7 @@ export default function ChatPanel() {
                     <button
                       type="button"
                       onClick={() => removeCustomEmoji(emojiEntry.id)}
-                      className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-destructive rounded-full text-white text-[8px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                      className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-destructive rounded-full text-destructive-foreground text-[8px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
                       data-ocid="chat.delete_button"
                     >
                       <X className="w-2 h-2" />
@@ -1256,11 +1256,11 @@ export default function ChatPanel() {
       )}
 
       {awaitingCorrection && (
-        <div className="px-4 py-2 bg-amber-950/40 border-t border-amber-600/40 flex items-center gap-2 shrink-0">
-          <span className="text-[10px] font-mono text-amber-400 tracking-widest animate-pulse">
+        <div className="px-4 py-2 bg-gold/5 border-t border-gold/40 flex items-center gap-2 shrink-0">
+          <span className="text-[10px] font-mono text-gold tracking-widest animate-pulse">
             ⟲
           </span>
-          <span className="text-[10px] font-mono text-amber-400/90 tracking-widest">
+          <span className="text-[10px] font-mono text-gold/90 tracking-widest">
             CORRECTION MODE — Type the correct information and press Enter
           </span>
         </div>

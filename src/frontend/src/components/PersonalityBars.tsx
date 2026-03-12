@@ -15,13 +15,13 @@ const traits = [
   {
     key: "friendliness" as const,
     label: "FRIENDLINESS",
-    color: "oklch(0.65 0.14 145)",
+    color: "oklch(0.62 0.10 85)",
     icon: "💛",
   },
   {
     key: "analytical" as const,
     label: "ANALYTICAL",
-    color: "oklch(0.60 0.14 200)",
+    color: "oklch(0.50 0.07 85)",
     icon: "🧠",
   },
 ];

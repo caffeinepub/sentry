@@ -220,7 +220,7 @@ export default function MemoryExplorer({ onMemoryClick }: MemoryExplorerProps) {
                 ? tab === "global"
                   ? "bg-gold/20 text-gold border border-gold/50"
                   : tab === "user"
-                    ? "bg-blue-900/30 text-blue-400 border border-blue-500/40"
+                    ? "bg-gold/10 text-gold/60 border border-gold/30"
                     : "bg-gold/20 text-gold border border-gold/40"
                 : "text-muted-foreground hover:text-foreground border border-transparent"
             }`}
@@ -283,7 +283,7 @@ export default function MemoryExplorer({ onMemoryClick }: MemoryExplorerProps) {
                       </span>
                     )}
                     {!item.isGlobal && (
-                      <span className="text-[8px] font-mono text-blue-400/60 tracking-widest">
+                      <span className="text-[8px] font-mono text-gold/40 tracking-widest">
                         USER
                       </span>
                     )}
