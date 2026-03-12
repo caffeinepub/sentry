@@ -1,7 +1,16 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Brain, Check, Cpu, Pencil, Search, Trash2, X } from "lucide-react";
+import {
+  Brain,
+  Check,
+  Cpu,
+  Network,
+  Pencil,
+  Search,
+  Trash2,
+  X,
+} from "lucide-react";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -26,7 +35,8 @@ type FilterTab =
   | "history"
   | "personal"
   | "user"
-  | "global";
+  | "global"
+  | "concepts";
 
 interface MemoryItem {
   id: bigint;
@@ -36,6 +46,13 @@ interface MemoryItem {
   concepts?: string[];
   isRule?: boolean;
   isGlobal?: boolean;
+}
+
+interface ConceptNode {
+  name: string;
+  type: string;
+  sources: string[];
+  count: number;
 }
 
 interface MemoryExplorerProps {
@@ -81,7 +98,50 @@ export default function MemoryExplorer({ onMemoryClick }: MemoryExplorerProps) {
     })),
   ];
 
-  // Filter out locally-deleted items immediately (before refetch)
+  // Build concept graph from memories
+  const conceptMap = new Map<string, ConceptNode>();
+  for (const mem of [...globalMemories, ...userMemories]) {
+    const type = mem.memoryType || "knowledge";
+    for (const concept of mem.concepts || []) {
+      const key = concept.toLowerCase().trim();
+      if (!key || key.length < 2) continue;
+      if (conceptMap.has(key)) {
+        const node = conceptMap.get(key)!;
+        node.count++;
+        if (!node.sources.includes(mem.text)) {
+          node.sources.push(mem.text);
+        }
+      } else {
+        conceptMap.set(key, {
+          name: concept,
+          type,
+          sources: [mem.text],
+          count: 1,
+        });
+      }
+    }
+    // Also extract concepts from memory text (simple noun extraction)
+    const words = mem.text
+      .split(/[\s,.!?;:]+/)
+      .filter((w) => w.length > 4 && /^[A-Za-z]/.test(w))
+      .slice(0, 8);
+    for (const word of words) {
+      const key = word.toLowerCase();
+      if (!conceptMap.has(key)) {
+        conceptMap.set(key, {
+          name: word,
+          type: mem.memoryType || "knowledge",
+          sources: [mem.text],
+          count: 1,
+        });
+      }
+    }
+  }
+  const allConcepts = Array.from(conceptMap.values()).sort(
+    (a, b) => b.count - a.count || a.name.localeCompare(b.name),
+  );
+
+  // Filter out locally-deleted items immediately
   const filtered = allMemories.filter((m) => {
     if (deletedIds.has(m.id.toString())) return false;
     const matchesSearch =
@@ -102,8 +162,14 @@ export default function MemoryExplorer({ onMemoryClick }: MemoryExplorerProps) {
     return true;
   });
 
+  const filteredConcepts = allConcepts.filter(
+    (c) =>
+      search === "" ||
+      c.name.toLowerCase().includes(search.toLowerCase()) ||
+      c.sources.some((s) => s.toLowerCase().includes(search.toLowerCase())),
+  );
+
   const handleDelete = async (item: MemoryItem) => {
-    // Immediately hide from UI
     setDeletedIds((prev) => new Set([...prev, item.id.toString()]));
     try {
       if (item.isRule) {
@@ -116,7 +182,6 @@ export default function MemoryExplorer({ onMemoryClick }: MemoryExplorerProps) {
       }
       toast.success("Memory deleted.");
     } catch {
-      // Keep it hidden even if canister delete fails (local-first UX)
       toast.error("Delete may not have synced to server, but hidden locally.");
     }
   };
@@ -156,6 +221,7 @@ export default function MemoryExplorer({ onMemoryClick }: MemoryExplorerProps) {
 
   const tabs: FilterTab[] = [
     "all",
+    "concepts",
     "knowledge",
     "rules",
     "history",
@@ -228,11 +294,13 @@ export default function MemoryExplorer({ onMemoryClick }: MemoryExplorerProps) {
             onClick={() => setActiveTab(tab)}
             className={`px-2 py-0.5 text-[10px] font-mono rounded tracking-widest uppercase transition-colors whitespace-nowrap ${
               activeTab === tab
-                ? tab === "global"
-                  ? "bg-gold/20 text-gold border border-gold/50"
-                  : tab === "user"
-                    ? "bg-gold/10 text-gold/60 border border-gold/30"
-                    : "bg-gold/20 text-gold border border-gold/40"
+                ? tab === "concepts"
+                  ? "bg-gold/30 text-gold border border-gold/60"
+                  : tab === "global"
+                    ? "bg-gold/20 text-gold border border-gold/50"
+                    : tab === "user"
+                      ? "bg-gold/10 text-gold/60 border border-gold/30"
+                      : "bg-gold/20 text-gold border border-gold/40"
                 : "text-muted-foreground hover:text-foreground border border-transparent"
             }`}
             data-ocid="memory.tab"
@@ -242,142 +310,222 @@ export default function MemoryExplorer({ onMemoryClick }: MemoryExplorerProps) {
         ))}
       </div>
 
-      {/* Memory list */}
-      <ScrollArea className="flex-1">
-        {filtered.length === 0 ? (
-          <div
-            className="flex flex-col items-center justify-center h-32 gap-2"
-            data-ocid="memory.empty_state"
-          >
-            <Brain className="w-8 h-8 text-muted-foreground/30" />
-            <span className="text-xs text-muted-foreground font-mono">
-              NO MEMORIES
-            </span>
-          </div>
-        ) : (
-          <div className="px-3 pb-3 space-y-1.5">
-            {filtered.map((item, idx) => (
-              <div
-                key={item.id.toString()}
-                className="group flex gap-2 p-2.5 rounded border border-border hover:border-gold/30 transition-all"
-                data-ocid={
-                  idx === 0
-                    ? "memory.item.1"
-                    : idx === 1
-                      ? "memory.item.2"
-                      : idx === 2
-                        ? "memory.item.3"
-                        : undefined
-                }
-              >
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5 mb-1">
-                    <span
-                      className={`text-[9px] px-1.5 py-0.5 rounded font-mono capitalize ${
-                        item.memoryType === "rule"
-                          ? "badge-rule"
-                          : item.memoryType === "history"
-                            ? "badge-history"
-                            : item.memoryType === "personal"
-                              ? "badge-personal"
-                              : "badge-knowledge"
-                      }`}
-                    >
-                      {item.memoryType}
-                    </span>
-                    <span className="text-[10px] text-muted-foreground font-mono">
-                      {formatTs(item.timestamp)}
-                    </span>
-                    {item.isGlobal && !item.isRule && (
-                      <span className="text-[8px] font-mono text-gold/40 tracking-widest">
-                        SHARED
+      {/* Concepts tab */}
+      {activeTab === "concepts" ? (
+        <ScrollArea className="flex-1">
+          {filteredConcepts.length === 0 ? (
+            <div
+              className="flex flex-col items-center justify-center h-32 gap-2"
+              data-ocid="memory.empty_state"
+            >
+              <Network className="w-8 h-8 text-muted-foreground/30" />
+              <span className="text-xs text-muted-foreground font-mono">
+                NO CONCEPTS YET
+              </span>
+              <span className="text-[10px] text-muted-foreground/50 font-mono text-center px-4">
+                Talk to Sentry — concepts are extracted automatically
+              </span>
+            </div>
+          ) : (
+            <div className="px-3 pb-3 space-y-1">
+              <p className="text-[9px] font-mono text-gold/40 tracking-widest py-1">
+                {filteredConcepts.length} LEARNED CONCEPTS
+              </p>
+              {filteredConcepts.map((concept, idx) => (
+                <button
+                  key={concept.name}
+                  type="button"
+                  className="w-full text-left group flex gap-2 p-2 rounded border border-border hover:border-gold/30 transition-all"
+                  onClick={() => onMemoryClick?.(concept.name)}
+                  data-ocid={
+                    idx === 0
+                      ? "memory.item.1"
+                      : idx === 1
+                        ? "memory.item.2"
+                        : idx === 2
+                          ? "memory.item.3"
+                          : undefined
+                  }
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5 mb-0.5">
+                      <span
+                        className={`text-[9px] px-1.5 py-0.5 rounded font-mono capitalize ${
+                          concept.type === "rule"
+                            ? "badge-rule"
+                            : concept.type === "prediction"
+                              ? "badge-prediction"
+                              : concept.type === "personal"
+                                ? "badge-personal"
+                                : "badge-knowledge"
+                        }`}
+                      >
+                        {concept.type}
                       </span>
+                      {concept.count > 1 && (
+                        <span className="text-[9px] font-mono text-gold/50">
+                          ×{concept.count}
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-xs text-gold font-mono">
+                      {concept.name}
+                    </span>
+                    {concept.sources[0] && (
+                      <p className="text-[9px] text-muted-foreground/60 line-clamp-1 mt-0.5">
+                        {concept.sources[0].slice(0, 60)}
+                        {concept.sources[0].length > 60 ? "..." : ""}
+                      </p>
                     )}
-                    {!item.isGlobal && (
-                      <span className="text-[8px] font-mono text-gold/40 tracking-widest">
-                        USER
+                  </div>
+                  <div className="shrink-0 self-center">
+                    <Network className="w-3 h-3 text-gold/20 group-hover:text-gold/50 transition-colors" />
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </ScrollArea>
+      ) : (
+        /* Memory list */
+        <ScrollArea className="flex-1">
+          {filtered.length === 0 ? (
+            <div
+              className="flex flex-col items-center justify-center h-32 gap-2"
+              data-ocid="memory.empty_state"
+            >
+              <Brain className="w-8 h-8 text-muted-foreground/30" />
+              <span className="text-xs text-muted-foreground font-mono">
+                NO MEMORIES
+              </span>
+            </div>
+          ) : (
+            <div className="px-3 pb-3 space-y-1.5">
+              {filtered.map((item, idx) => (
+                <div
+                  key={item.id.toString()}
+                  className="group flex gap-2 p-2.5 rounded border border-border hover:border-gold/30 transition-all"
+                  data-ocid={
+                    idx === 0
+                      ? "memory.item.1"
+                      : idx === 1
+                        ? "memory.item.2"
+                        : idx === 2
+                          ? "memory.item.3"
+                          : undefined
+                  }
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <span
+                        className={`text-[9px] px-1.5 py-0.5 rounded font-mono capitalize ${
+                          item.memoryType === "rule"
+                            ? "badge-rule"
+                            : item.memoryType === "history"
+                              ? "badge-history"
+                              : item.memoryType === "personal"
+                                ? "badge-personal"
+                                : item.memoryType === "prediction"
+                                  ? "badge-prediction"
+                                  : "badge-knowledge"
+                        }`}
+                      >
+                        {item.memoryType}
                       </span>
+                      <span className="text-[10px] text-muted-foreground font-mono">
+                        {formatTs(item.timestamp)}
+                      </span>
+                      {item.isGlobal && !item.isRule && (
+                        <span className="text-[8px] font-mono text-gold/40 tracking-widest">
+                          SHARED
+                        </span>
+                      )}
+                      {!item.isGlobal && (
+                        <span className="text-[8px] font-mono text-gold/40 tracking-widest">
+                          USER
+                        </span>
+                      )}
+                    </div>
+
+                    {editingId === item.id ? (
+                      <div className="flex gap-1 items-start">
+                        <Input
+                          value={editText}
+                          onChange={(e) => setEditText(e.target.value)}
+                          className="h-7 text-xs font-mono bg-input border-border flex-1"
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") saveEdit(item.id);
+                            if (e.key === "Escape") setEditingId(null);
+                          }}
+                          autoFocus
+                          data-ocid="memory.input"
+                        />
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="w-6 h-6 text-gold hover:bg-gold/10"
+                          onClick={() => saveEdit(item.id)}
+                          data-ocid="memory.save_button"
+                        >
+                          <Check className="w-3 h-3" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="w-6 h-6 text-muted-foreground"
+                          onClick={() => setEditingId(null)}
+                          data-ocid="memory.cancel_button"
+                        >
+                          <X className="w-3 h-3" />
+                        </Button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        className="text-xs text-foreground line-clamp-2 leading-relaxed w-full text-left"
+                        onClick={() => onMemoryClick?.(item.text)}
+                      >
+                        {item.text}
+                      </button>
                     )}
                   </div>
 
-                  {editingId === item.id ? (
-                    <div className="flex gap-1 items-start">
-                      <Input
-                        value={editText}
-                        onChange={(e) => setEditText(e.target.value)}
-                        className="h-7 text-xs font-mono bg-input border-border flex-1"
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") saveEdit(item.id);
-                          if (e.key === "Escape") setEditingId(null);
-                        }}
-                        autoFocus
-                        data-ocid="memory.input"
-                      />
+                  {editingId !== item.id && (
+                    <div className="flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 shrink-0">
+                      {!item.isRule && !item.isGlobal && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="w-6 h-6 text-muted-foreground hover:text-gold"
+                          onClick={() => startEdit(item.id, item.text)}
+                          data-ocid="memory.edit_button.1"
+                        >
+                          <Pencil className="w-3 h-3" />
+                        </Button>
+                      )}
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="w-6 h-6 text-gold hover:bg-gold/10"
-                        onClick={() => saveEdit(item.id)}
-                        data-ocid="memory.save_button"
+                        className="w-6 h-6 text-muted-foreground hover:text-destructive"
+                        onClick={() => handleDelete(item)}
+                        data-ocid="memory.delete_button.1"
                       >
-                        <Check className="w-3 h-3" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="w-6 h-6 text-muted-foreground"
-                        onClick={() => setEditingId(null)}
-                        data-ocid="memory.cancel_button"
-                      >
-                        <X className="w-3 h-3" />
+                        <Trash2 className="w-3 h-3" />
                       </Button>
                     </div>
-                  ) : (
-                    <button
-                      type="button"
-                      className="text-xs text-foreground line-clamp-2 leading-relaxed w-full text-left"
-                      onClick={() => onMemoryClick?.(item.text)}
-                    >
-                      {item.text}
-                    </button>
                   )}
                 </div>
-
-                {editingId !== item.id && (
-                  <div className="flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 shrink-0">
-                    {!item.isRule && !item.isGlobal && (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="w-6 h-6 text-muted-foreground hover:text-gold"
-                        onClick={() => startEdit(item.id, item.text)}
-                        data-ocid="memory.edit_button.1"
-                      >
-                        <Pencil className="w-3 h-3" />
-                      </Button>
-                    )}
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="w-6 h-6 text-muted-foreground hover:text-destructive"
-                      onClick={() => handleDelete(item)}
-                      data-ocid="memory.delete_button.1"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                    </Button>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </ScrollArea>
+              ))}
+            </div>
+          )}
+        </ScrollArea>
+      )}
 
       {/* Stats */}
       <div className="px-3 py-2 border-t border-border shrink-0">
         <p className="text-[10px] font-mono text-muted-foreground">
           {allMemories.length - deletedIds.size} MEMORIES {" // "}{" "}
-          {rules.length} RULES
+          {rules.length} RULES {" // "} {allConcepts.length} CONCEPTS
         </p>
       </div>
     </div>

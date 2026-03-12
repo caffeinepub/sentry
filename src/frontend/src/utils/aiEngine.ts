@@ -100,6 +100,22 @@ export function buildReasoningChain(query: string, rules: Rule[]): string {
   );
 
   if (relevantRules.length === 0) {
+    // Try reverse reasoning: look for rules whose EFFECT matches the query
+    const reverseRules = rules.filter(
+      (r) =>
+        lower.includes(r.effect.toLowerCase()) ||
+        r.effect
+          .toLowerCase()
+          .split(" ")
+          .some((w) => w.length > 3 && lower.includes(w)),
+    );
+    if (reverseRules.length > 0) {
+      let reverseChain = `**Reverse reasoning for: "${query}"** (tracing causes)\n\n`;
+      for (const r of reverseRules) {
+        reverseChain += `→ **${r.effect}** ← caused by IF **${r.condition}**\n`;
+      }
+      return reverseChain;
+    }
     return `I don't have any specific rules to reason about "${query}" yet. You can teach me: IF ${query} THEN <effect>`;
   }
 
@@ -124,16 +140,33 @@ export function buildReasoningChain(query: string, rules: Rule[]): string {
   return chain;
 }
 
+export interface ExtractedTriple {
+  subject: string;
+  verb: string;
+  object: string;
+  conditional?: boolean;
+}
+
 export interface DetectedConcepts {
   facts: string[];
+  conditionalFacts: string[];
   rules: { condition: string; effect: string }[];
   personalFacts: { subject: string; predicate: string; object: string }[];
   dateReferences: string[];
   predictions: string[];
   isTeaching: boolean;
   isQuestion: boolean;
-  // enriched extracted concepts for knowledge graph
-  extractedTriples: { subject: string; verb: string; object: string }[];
+  extractedTriples: ExtractedTriple[];
+  lastMentionedEntity: string;
+}
+
+/**
+ * Detect modal words indicating conditional/partial truth
+ */
+function isConditional(text: string): boolean {
+  const conditionalWords =
+    /\b(might|could|possibly|sometimes|maybe|in some cases|occasionally|perhaps|may|not always|usually|often|tends to|can sometimes|typically)\b/i;
+  return conditionalWords.test(text);
 }
 
 /**
@@ -142,17 +175,22 @@ export interface DetectedConcepts {
  * - Causal chain detection
  * - Temporal references
  * - Predictions
- * - Identity claims
+ * - Identity claims with pronoun resolution
  * - Negations
  * - Enumerations ("X are: a, b, c")
- * - Order-independent parsing (analyses all clauses)
+ * - Order-independent parsing
+ * - Conditional/modal detection ("might", "could", etc.)
+ * - Pronoun resolution (I/me/my → username, you/your → Sentry, they/them → last entity)
  */
 export function detectConceptsFromNaturalLanguage(
   text: string,
+  username = "user",
 ): DetectedConcepts {
   const lower = text.toLowerCase().trim();
+  const sentryName = "Sentry";
   const result: DetectedConcepts = {
     facts: [],
+    conditionalFacts: [],
     rules: [],
     personalFacts: [],
     dateReferences: [],
@@ -160,6 +198,7 @@ export function detectConceptsFromNaturalLanguage(
     isTeaching: false,
     isQuestion: false,
     extractedTriples: [],
+    lastMentionedEntity: "",
   };
 
   // Question detection
@@ -203,6 +242,8 @@ export function detectConceptsFromNaturalLanguage(
     const m = text.match(pat);
     if (m?.[1] && m[2]) {
       const subject = m[1].trim();
+      // Track as last mentioned entity for they/them reference
+      result.lastMentionedEntity = subject;
       const items = m[2]
         .split(/,\s*|\s+and\s+/)
         .map((s) => s.trim())
@@ -225,7 +266,6 @@ export function detectConceptsFromNaturalLanguage(
   const predictionPatterns = [
     /(.+?)\s+will\s+(?:probably\s+)?(.+?)(?:[.!]|$)/i,
     /(.+?)\s+is going to\s+(.+?)(?:[.!]|$)/i,
-    /(.+?)\s+might\s+(.+?)(?:[.!]|$)/i,
     /(.+?)\s+is likely to\s+(.+?)(?:[.!]|$)/i,
     /(.+?)\s+is expected to\s+(.+?)(?:[.!]|$)/i,
     /i predict(?:\s+that)?\s+(.+?)(?:[.!]|$)/i,
@@ -233,6 +273,7 @@ export function detectConceptsFromNaturalLanguage(
     /(.+?)\s+should\s+(.+?)\s+in the future(?:[.!]|$)/i,
     /probably\s+(.+?)(?:[.!]|$)/i,
     /it'?s likely\s+(.+?)(?:[.!]|$)/i,
+    /next time(.+?)then(.+?)(?:[.!]|$)/i,
   ];
   for (const pat of predictionPatterns) {
     const m = text.match(pat);
@@ -244,6 +285,39 @@ export function detectConceptsFromNaturalLanguage(
       } else if (m[1]) {
         result.predictions.push(m[1].trim());
       }
+    }
+  }
+
+  // ── CONDITIONAL / MIGHT patterns ──
+  // "X might Y", "X could possibly Y", "sometimes X is Y" etc.
+  const conditionalPatterns = [
+    /(.+?)\s+might\s+(.+?)(?:[.!]|$)/i,
+    /(.+?)\s+could\s+(?:possibly\s+)?(.+?)(?:[.!]|$)/i,
+    /sometimes\s+(.+?)\s+(is|are|has|have)\s+(.+?)(?:[.!]|$)/i,
+    /maybe\s+(.+?)\s+(is|are|has|have|will)\s+(.+?)(?:[.!]|$)/i,
+    /possibly\s+(.+?)\s+(is|are)\s+(.+?)(?:[.!]|$)/i,
+    /occasionally\s+(.+?)(?:[.!]|$)/i,
+  ];
+  for (const pat of conditionalPatterns) {
+    const m = text.match(pat);
+    if (m) {
+      const factText = m[0].trim();
+      if (!result.conditionalFacts.includes(factText)) {
+        result.conditionalFacts.push(factText);
+      }
+      if (m[1] && m[2]) {
+        const subj = m[1].trim();
+        const verb = m[2].trim();
+        const obj = m[3]?.trim() || "";
+        result.extractedTriples.push({
+          subject: subj,
+          verb: verb,
+          object: obj,
+          conditional: true,
+        });
+        result.lastMentionedEntity = subj;
+      }
+      result.isTeaching = true;
     }
   }
 
@@ -275,7 +349,7 @@ export function detectConceptsFromNaturalLanguage(
     const m = text.match(pat);
     if (m) {
       result.personalFacts.push({
-        subject: "user",
+        subject: username,
         predicate: "believes",
         object: m[1]?.trim() || m[0].trim(),
       });
@@ -291,20 +365,26 @@ export function detectConceptsFromNaturalLanguage(
     /(\w[\w\s]+?)\s+is stronger than\s+([\w\s]+?)(?:[.!,]|$)/i,
     /(\w[\w\s]+?)\s+is super effective against\s+([\w\s]+?)(?:[.!,]|$)/i,
     /(\w[\w\s]+?)\s+is weak against\s+([\w\s]+?)(?:[.!,]|$)/i,
+    // Power/effect chains: "[power] is used [on/by/against] [target] [to do/causing] [effect]"
+    /(\w[\w\s]+?)\s+(?:is used|used)\s+(?:on|by|against)\s+([\w\s]+?)\s+(?:to|causing|to do)\s+(.+?)(?:[.!,]|$)/i,
+    // Against order-independent: "Against X, Y is Z"
+    /against\s+([\w\s]+?)[,]\s+([\w\s]+?)\s+is\s+(.+?)(?:[.!,]|$)/i,
   ];
   for (const pat of compPatterns) {
     const m = text.match(pat);
     if (m) {
       result.facts.push(m[0].trim());
+      if (m[1]) result.lastMentionedEntity = m[1].trim();
       if (m[1] && m[2]) {
         const verbMatch = m[0].match(
-          /is\s+(better|worse|stronger|super effective|weak)[\w\s]*than|are similar/i,
+          /is\s+(better|worse|stronger|super effective|weak)[\w\s]*(?:than|against)|are similar|is used|used/i,
         );
         const verb = verbMatch ? verbMatch[0] : "relates to";
         result.extractedTriples.push({
           subject: m[1].trim(),
           verb,
           object: m[2].trim(),
+          conditional: isConditional(m[0]),
         });
       }
       result.isTeaching = true;
@@ -333,31 +413,49 @@ export function detectConceptsFromNaturalLanguage(
     }
   }
 
-  // ── PERSONAL IDENTITY patterns ──
+  // ── PERSONAL IDENTITY patterns with pronoun resolution ──
+  // I/me/my/I'm → username
+  // you/you're/you were → Sentry
+  // they/them/their → lastMentionedEntity
   const personalPatterns = [
-    { re: /i am(.+?)(?:[.,!]|$)/i, subj: "user", pred: "is" },
-    { re: /i'm(.+?)(?:[.,!]|$)/i, subj: "user", pred: "is" },
-    { re: /i like(.+?)(?:[.,!]|$)/i, subj: "user", pred: "likes" },
-    { re: /i love(.+?)(?:[.,!]|$)/i, subj: "user", pred: "loves" },
-    { re: /i hate(.+?)(?:[.,!]|$)/i, subj: "user", pred: "hates" },
-    { re: /i prefer(.+?)(?:[.,!]|$)/i, subj: "user", pred: "prefers" },
+    { re: /i am(.+?)(?:[.,!]|$)/i, subj: username, pred: "is" },
+    { re: /i'm(.+?)(?:[.,!]|$)/i, subj: username, pred: "is" },
+    { re: /i like(.+?)(?:[.,!]|$)/i, subj: username, pred: "likes" },
+    { re: /i love(.+?)(?:[.,!]|$)/i, subj: username, pred: "loves" },
+    { re: /i hate(.+?)(?:[.,!]|$)/i, subj: username, pred: "hates" },
+    { re: /i prefer(.+?)(?:[.,!]|$)/i, subj: username, pred: "prefers" },
     {
       re: /i work (?:at|for|in)(.+?)(?:[.,!]|$)/i,
-      subj: "user",
+      subj: username,
       pred: "works at",
     },
-    { re: /i live in(.+?)(?:[.,!]|$)/i, subj: "user", pred: "lives in" },
-    { re: /i was born(.+?)(?:[.,!]|$)/i, subj: "user", pred: "was born" },
-    { re: /i'm from(.+?)(?:[.,!]|$)/i, subj: "user", pred: "is from" },
-    { re: /my name is(.+?)(?:[.,!]|$)/i, subj: "user", pred: "is named" },
-    { re: /my (\w+) is(.+?)(?:[.,!]|$)/i, subj: "user", pred: "has" },
-    { re: /you are(.+?)(?:[.,!]|$)/i, subj: "sentry", pred: "is" },
-    { re: /you're(.+?)(?:[.,!]|$)/i, subj: "sentry", pred: "is" },
-    { re: /you like(.+?)(?:[.,!]|$)/i, subj: "sentry", pred: "likes" },
+    { re: /i live in(.+?)(?:[.,!]|$)/i, subj: username, pred: "lives in" },
+    { re: /i was born(.+?)(?:[.,!]|$)/i, subj: username, pred: "was born" },
+    { re: /i'm from(.+?)(?:[.,!]|$)/i, subj: username, pred: "is from" },
+    { re: /my name is(.+?)(?:[.,!]|$)/i, subj: username, pred: "is named" },
+    { re: /my (\w+) is(.+?)(?:[.,!]|$)/i, subj: username, pred: "has" },
+    { re: /i was(.+?)(?:[.,!]|$)/i, subj: username, pred: "was" },
+    { re: /i did(.+?)(?:[.,!]|$)/i, subj: username, pred: "did" },
+    { re: /i have(.+?)(?:[.,!]|$)/i, subj: username, pred: "has" },
+    // you/you're/you were → Sentry
+    { re: /you are(.+?)(?:[.,!]|$)/i, subj: sentryName, pred: "is" },
+    { re: /you're(.+?)(?:[.,!]|$)/i, subj: sentryName, pred: "is" },
+    { re: /you like(.+?)(?:[.,!]|$)/i, subj: sentryName, pred: "likes" },
+    { re: /you were(.+?)(?:[.,!]|$)/i, subj: sentryName, pred: "was" },
     {
       re: /you were (created|made|built|designed)(.+?)(?:[.,!]|$)/i,
-      subj: "sentry",
+      subj: sentryName,
       pred: "was created",
+    },
+    {
+      re: /you can(.+?)(?:[.,!]|$)/i,
+      subj: sentryName,
+      pred: "can",
+    },
+    {
+      re: /you should(.+?)(?:[.,!]|$)/i,
+      subj: sentryName,
+      pred: "should",
     },
   ];
   for (const { re, subj, pred } of personalPatterns) {
@@ -369,6 +467,26 @@ export function detectConceptsFromNaturalLanguage(
         subject: subj,
         predicate: pred,
         object: obj,
+      });
+    }
+  }
+
+  // ── THIRD-PARTY (they/them/their) reference ──
+  const theyPatterns = [
+    /they are(.+?)(?:[.,!]|$)/i,
+    /they were(.+?)(?:[.,!]|$)/i,
+    /they like(.+?)(?:[.,!]|$)/i,
+    /their (.+?) is(.+?)(?:[.,!]|$)/i,
+    /them(.+?)(?:[.,!]|$)/i,
+  ];
+  for (const re of theyPatterns) {
+    const m = text.match(re);
+    if (m?.[1]) {
+      const entityName = result.lastMentionedEntity || "unknown entity";
+      result.personalFacts.push({
+        subject: entityName,
+        predicate: "(they) relates to",
+        object: m[1].trim(),
       });
     }
   }
@@ -398,27 +516,45 @@ export function detectConceptsFromNaturalLanguage(
     if (m) result.dateReferences.push(m[0]);
   }
 
+  // ── WHO/WHAT/WHERE/WHEN/HOW chains ──
+  // "X is used on Y when Z" → relation
+  const whoWhatPatterns = [
+    /([\w\s]+?)\s+is used\s+(?:on|by|against|with)\s+([\w\s]+?)\s+when\s+(.+?)(?:[.!]|$)/i,
+    /([\w\s]+?)\s+(?:works?|applies?)\s+(?:on|to)\s+([\w\s]+?)\s+(?:in|when|during)\s+(.+?)(?:[.!]|$)/i,
+    /([\w\s]+?)\s+(?:can be used|is used)\s+(?:to|for)\s+(.+?)(?:[.!]|$)/i,
+    /([\w\s]+?)\s+(?:affects?|targets?)\s+([\w\s]+?)\s+(?:by|to|causing)\s+(.+?)(?:[.!]|$)/i,
+  ];
+  for (const pat of whoWhatPatterns) {
+    const m = text.match(pat);
+    if (m?.[1] && m[2]) {
+      const subj = m[1].trim();
+      const obj = m[2].trim();
+      const cond = m[3]?.trim() || "";
+      result.lastMentionedEntity = subj;
+      result.facts.push(m[0].trim());
+      result.extractedTriples.push({
+        subject: subj,
+        verb: "is used on",
+        object: obj + (cond ? ` when ${cond}` : ""),
+      });
+      result.isTeaching = true;
+    }
+  }
+
   // ── SVO TRIPLE EXTRACTION (order-independent, sentence-by-sentence) ──
-  // Split on sentence boundaries AND conjunctions to capture clause-level info
   const sentences = text
     .split(/[.!;]|(?:\s+and\s+)|(?:\s+but\s+)|(?:\s+while\s+)/)
     .map((s) => s.trim())
     .filter((s) => s.length > 3);
 
   for (const sentence of sentences) {
-    // Extended SVO patterns
+    const sentConditional = isConditional(sentence);
     const svoPatterns = [
-      // is/are/was/were
       /^(?:the\s+)?(.+?)\s+(is|are|was|were)\s+(.+)$/i,
-      // has/have/had
       /^(?:the\s+)?(.+?)\s+(has|have|had)\s+(.+)$/i,
-      // can/could/will/would/should
       /^(?:the\s+)?(.+?)\s+(can|could|will|would|should|must)\s+(.+)$/i,
-      // does/do/did
       /^(?:the\s+)?(.+?)\s+(does|do|did)\s+(.+)$/i,
-      // action verbs
       /^(?:the\s+)?(.+?)\s+(helps|hurts|prevents|attacks|defends|protects|defeats|counters|uses|requires|needs|creates|destroys|controls|commands|summons|predicts|reveals|hides|stores|retrieves|transforms|evolves|generates|absorbs|reflects|amplifies|reduces)\s+(.+)$/i,
-      // type/category classification
       /^(?:the\s+)?(.+?)\s+(is a|is an|are a|are an|belongs to|is part of|is a type of|is known as|is called)\s+(.+)$/i,
     ];
 
@@ -428,14 +564,24 @@ export function detectConceptsFromNaturalLanguage(
         const subj = m[1].trim();
         const verb = m[2].trim();
         const obj = m[3].trim();
-        // Skip pure personal/sentry patterns (handled above)
         const isPersonal = /^(i|you|we|they|it)$/i.test(subj.split(" ")[0]);
         if (!isPersonal && sentence.split(" ").length >= 3) {
           const fullFact = sentence;
           if (!result.facts.includes(fullFact)) {
-            result.facts.push(fullFact);
+            if (sentConditional) {
+              result.conditionalFacts.push(fullFact);
+            } else {
+              result.facts.push(fullFact);
+            }
           }
-          result.extractedTriples.push({ subject: subj, verb, object: obj });
+          // Track last mentioned entity for they/them resolution
+          if (subj.length > 2) result.lastMentionedEntity = subj;
+          result.extractedTriples.push({
+            subject: subj,
+            verb,
+            object: obj,
+            conditional: sentConditional,
+          });
           result.isTeaching = true;
         }
         break;
@@ -451,7 +597,6 @@ export function detectConceptsFromNaturalLanguage(
  * with direct fetch as fallback.
  */
 export async function fetchLinkContent(url: string): Promise<string | null> {
-  // Try allorigins proxy first (avoids CORS issues)
   try {
     const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
     const resp = await fetch(proxyUrl, {
@@ -471,7 +616,6 @@ export async function fetchLinkContent(url: string): Promise<string | null> {
             /<meta[^>]+content=["']([^"']+)["'][^>]+name=["']description["']/i,
           );
         const desc = descMatch ? descMatch[1].trim().slice(0, 300) : null;
-        // Extract first meaningful paragraph
         const paraMatch = html.match(/<p[^>]*>([^<]{30,})<\/p>/i);
         const para = paraMatch
           ? paraMatch[1]
@@ -490,10 +634,9 @@ export async function fetchLinkContent(url: string): Promise<string | null> {
       }
     }
   } catch {
-    // fall through to direct fetch
+    // fall through
   }
 
-  // Fallback: direct fetch (works for CORS-enabled sites)
   try {
     const resp = await fetch(url, {
       signal: AbortSignal.timeout(5000),
@@ -591,11 +734,19 @@ export function generateAIResponse(
   if (detectedConcepts) {
     const count =
       detectedConcepts.facts.length +
+      detectedConcepts.conditionalFacts.length +
       detectedConcepts.rules.length +
       detectedConcepts.personalFacts.length +
       detectedConcepts.extractedTriples.length;
     if (count > 0 && detectedConcepts.isTeaching) {
-      autoLearnNote = `\n\n*[Auto-learned ${count} concept${count > 1 ? "s" : ""}]*`;
+      const conditionalCount =
+        detectedConcepts.conditionalFacts.length +
+        detectedConcepts.extractedTriples.filter((t) => t.conditional).length;
+      const conditionalNote =
+        conditionalCount > 0
+          ? ` (${conditionalCount} conditional/situational)`
+          : "";
+      autoLearnNote = `\n\n*[Auto-learned ${count} concept${count > 1 ? "s" : ""}${conditionalNote}]*`;
     }
   }
 
@@ -608,14 +759,21 @@ export function generateAIResponse(
     predictionNote = `\n\n*[Prediction tracked: "${pred}" — stored as a future event in my knowledge graph.]*`;
   }
 
-  // 15% probability curiosity follow-up when new concepts are detected
+  let conditionalNote = "";
+  if (
+    detectedConcepts?.conditionalFacts &&
+    detectedConcepts.conditionalFacts.length > 0
+  ) {
+    conditionalNote = `\n\n*[~Conditional: "${detectedConcepts.conditionalFacts[0].slice(0, 80)}" — only sometimes true.]*`;
+  }
+
   const newConceptCount = detectedConcepts
     ? detectedConcepts.facts.length +
       detectedConcepts.rules.length +
       detectedConcepts.extractedTriples.length
     : 0;
   const curiosityFollowUp =
-    newConceptCount > 0 && Math.random() < 0.15
+    newConceptCount > 0 && Math.random() < 0.2
       ? `\n\n${CURIOSITY_FOLLOW_UPS[Math.floor(Math.random() * CURIOSITY_FOLLOW_UPS.length)]}`
       : "";
 
@@ -683,7 +841,7 @@ export function generateAIResponse(
     response = `I note this is time-sensitive — you mentioned "${timeRef}". ${context}I've stored the temporal context alongside the information.`;
     if (detectedConcepts.personalFacts.length > 0) {
       const pf = detectedConcepts.personalFacts[0];
-      response += ` I've also noted that you ${pf.predicate} ${pf.object}.`;
+      response += ` I've also noted that ${pf.subject} ${pf.predicate} ${pf.object}.`;
     }
   } else if (detectedConcepts?.rules && detectedConcepts.rules.length > 0) {
     const rule = detectedConcepts.rules[0];
@@ -696,20 +854,23 @@ export function generateAIResponse(
     const pf = detectedConcepts.personalFacts;
     if (pf.length > 0) {
       const item = pf[0];
-      if (item.subject === "user") {
+      if (item.subject !== "Sentry") {
         if (item.predicate === "believes") {
-          response = `I've noted your perspective — you believe${item.object}. ${context}I'll weigh that in our conversations.`;
+          response = `I've noted your perspective — ${item.subject} believes${item.object}. ${context}I'll weigh that in our conversations.`;
         } else {
-          response = `I've noted that you ${item.predicate} ${item.object}. ${context}I'll remember that about you.`;
+          response = `I've noted that ${item.subject} ${item.predicate} ${item.object}. ${context}I'll remember that.`;
         }
       } else {
         response = `Understood — you're shaping my self-model: ${item.predicate} ${item.object}. ${context}I'll incorporate that.`;
       }
     } else if (detectedConcepts.extractedTriples.length > 0) {
       const triple = detectedConcepts.extractedTriples[0];
-      response = `Understood — **${triple.subject}** *${triple.verb}* **${triple.object}**. ${context}I've mapped this relationship in my knowledge graph.`;
+      const condLabel = triple.conditional ? " *(sometimes true)*" : "";
+      response = `Understood — **${triple.subject}** *${triple.verb}* **${triple.object}**${condLabel}. ${context}I've mapped this relationship in my knowledge graph.`;
     } else if (detectedConcepts.facts.length > 0) {
       response = `I've registered that: "${detectedConcepts.facts[0]}". ${context}Added to my knowledge base.`;
+    } else if (detectedConcepts.conditionalFacts.length > 0) {
+      response = `I've noted this conditional: "${detectedConcepts.conditionalFacts[0]}" — tagged as *sometimes true*. ${context}`;
     } else {
       response = `Got it. ${context}I've filed that away in my knowledge base.`;
     }
@@ -740,6 +901,7 @@ export function generateAIResponse(
       selfReflection +
       autoLearnNote +
       predictionNote +
+      conditionalNote +
       curiosityFollowUp,
     personalityDelta: delta,
   };

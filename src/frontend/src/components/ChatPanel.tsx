@@ -287,6 +287,16 @@ export default function ChatPanel() {
   const [localEmojis, setLocalEmojis] = useState<LocalEmoji[]>(() =>
     getLocalEmojis(),
   );
+  const [deletedDefaultEmojis, setDeletedDefaultEmojis] = useState<Set<string>>(
+    () => {
+      try {
+        const stored = localStorage.getItem("sentry-deleted-default-emojis");
+        return stored ? new Set(JSON.parse(stored)) : new Set<string>();
+      } catch {
+        return new Set<string>();
+      }
+    },
+  );
 
   const { data: globalMemories = [] } = useGetMemories(true);
   const { data: userMemories = [] } = useGetUserMemories();
@@ -348,6 +358,17 @@ export default function ChatPanel() {
     if (u) {
       saveChatMessages(u, messages);
     }
+  }, [messages]);
+
+  // Auto-save every 30 seconds
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const u = getCurrentUser() || "";
+      if (u && messages.length > 0) {
+        saveChatMessages(u, messages);
+      }
+    }, 30_000);
+    return () => clearInterval(interval);
   }, [messages]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: scroll trigger
@@ -669,7 +690,7 @@ export default function ChatPanel() {
         return;
       }
 
-      const detected = detectConceptsFromNaturalLanguage(text);
+      const detected = detectConceptsFromNaturalLanguage(text, currentUsername);
 
       for (const rule of detected.rules) {
         if (isAdmin) {
@@ -1208,19 +1229,55 @@ export default function ChatPanel() {
           </div>
           <div className="border-t border-gold/20 mb-2" />
           <div className="flex flex-wrap gap-1 mb-3">
-            {EMOJI_LIST.map((emoji) => (
+            <p className="w-full text-[9px] font-mono text-gold/50 tracking-widest mb-1">
+              DEFAULT EMOJIS
+            </p>
+            {EMOJI_LIST.filter((e) => !deletedDefaultEmojis.has(e)).map(
+              (emoji) => (
+                <div key={emoji} className="relative group">
+                  <button
+                    type="button"
+                    className="text-xl hover:scale-125 transition-transform w-8 h-8 flex items-center justify-center rounded hover:bg-gold/10"
+                    onClick={() => {
+                      insertEmoji(emoji);
+                      setShowEmoji(false);
+                    }}
+                  >
+                    {emoji}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = new Set(deletedDefaultEmojis);
+                      next.add(emoji);
+                      setDeletedDefaultEmojis(next);
+                      try {
+                        localStorage.setItem(
+                          "sentry-deleted-default-emojis",
+                          JSON.stringify([...next]),
+                        );
+                      } catch {}
+                    }}
+                    className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-destructive rounded-full text-destructive-foreground text-[8px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                    data-ocid="chat.delete_button"
+                  >
+                    <X className="w-2 h-2" />
+                  </button>
+                </div>
+              ),
+            )}
+            {deletedDefaultEmojis.size > 0 && (
               <button
-                key={emoji}
                 type="button"
-                className="text-xl hover:scale-125 transition-transform w-8 h-8 flex items-center justify-center rounded hover:bg-gold/10"
                 onClick={() => {
-                  insertEmoji(emoji);
-                  setShowEmoji(false);
+                  setDeletedDefaultEmojis(new Set());
+                  localStorage.removeItem("sentry-deleted-default-emojis");
                 }}
+                className="text-[9px] font-mono text-gold/40 hover:text-gold transition-colors px-1"
               >
-                {emoji}
+                restore
               </button>
-            ))}
+            )}
           </div>
           <div className="border-t border-gold/20 pt-2 flex gap-1">
             <input
