@@ -52,6 +52,19 @@ import {
   interpretMediaAttachment,
 } from "../utils/aiEngine";
 import { getCurrentUser } from "../utils/localAuth";
+import {
+  type LocalEmoji,
+  type LocalGif,
+  addLocalEmoji,
+  addLocalGif,
+  clearChatMessages,
+  getChatMessages,
+  getLocalEmojis,
+  getLocalGifs,
+  removeLocalEmoji,
+  removeLocalGif,
+  saveChatMessages,
+} from "../utils/localDB";
 import PersonalityBars from "./PersonalityBars";
 import TimelinePanel from "./TimelinePanel";
 
@@ -247,7 +260,10 @@ function getBadgeClass(commandType: string): string {
 }
 
 export default function ChatPanel() {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>(() => {
+    const u = getCurrentUser() || "";
+    return getChatMessages(u);
+  });
   const [input, setInput] = useState("");
   const [isThinking, setIsThinking] = useState(false);
   const [showTimeline, setShowTimeline] = useState(false);
@@ -267,6 +283,10 @@ export default function ChatPanel() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const msgCountRef = useRef(0);
+  const [localGifs, setLocalGifs] = useState<LocalGif[]>(() => getLocalGifs());
+  const [localEmojis, setLocalEmojis] = useState<LocalEmoji[]>(() =>
+    getLocalEmojis(),
+  );
 
   const { data: globalMemories = [] } = useGetMemories(true);
   const { data: userMemories = [] } = useGetUserMemories();
@@ -315,12 +335,20 @@ export default function ChatPanel() {
         avatarUrl: "",
       }));
       setMessages(converted);
-    } else if (canisterMessages.length === 0) {
-      // If canister returned 0 and we already have messages from a previous sync, keep them
-      // Only reset to empty on first load (when local messages is also empty)
-      setMessages((prev) => (prev.length === 0 ? [] : prev));
+      // Also save to localStorage for offline/persistence
+      const u = getCurrentUser() || "";
+      if (u) saveChatMessages(u, converted);
     }
+    // If canister returns empty, keep localStorage messages (already initialized from there)
   }, [canisterMessages]);
+
+  // Save messages to localStorage whenever they change
+  useEffect(() => {
+    const u = getCurrentUser() || "";
+    if (u) {
+      saveChatMessages(u, messages);
+    }
+  }, [messages]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: scroll trigger
   useEffect(() => {
@@ -330,26 +358,30 @@ export default function ChatPanel() {
 
   const addGif = async () => {
     if (!newGifUrl.trim()) return;
+    const url = newGifUrl.trim();
+    const label = newGifLabel.trim() || "GIF";
+    setNewGifUrl("");
+    setNewGifLabel("");
     try {
-      console.log("[GIF] Adding GIF:", newGifUrl.trim());
-      await addCustomGifMutation.mutateAsync({
-        url: newGifUrl.trim(),
-        gifLabel: newGifLabel.trim() || "GIF",
-      });
-      console.log(
-        "[GIF] Successfully added. Current GIF count:",
-        canisterGifs.length + 1,
-      );
-      setNewGifUrl("");
-      setNewGifLabel("");
+      await addCustomGifMutation.mutateAsync({ url, gifLabel: label });
       toast.success("GIF added successfully!");
     } catch (err) {
-      console.error("[GIF] Failed to add:", err);
-      toast.error("Failed to add GIF. Please try again.");
+      console.error("[GIF] Canister add failed, storing locally:", err);
+      // Add to local fallback so it's visible and deletable
+      const localGif = addLocalGif(url, label);
+      setLocalGifs((prev) => [...prev, localGif]);
+      toast.success("GIF saved locally (canister unavailable).");
     }
   };
 
-  const removeGif = async (id: bigint) => {
+  const removeGif = async (id: bigint | string) => {
+    // Check if it's a local gif (string id)
+    if (typeof id === "string") {
+      removeLocalGif(id);
+      setLocalGifs((prev) => prev.filter((g) => g.id !== id));
+      toast.success("GIF removed.");
+      return;
+    }
     try {
       await deleteCustomGifMutation.mutateAsync(id);
       toast.success("GIF removed.");
@@ -359,30 +391,39 @@ export default function ChatPanel() {
   };
 
   const insertGif = (gif: { url: string; gifLabel: string }) => {
-    addMessage({
+    const msg = addMessage({
       role: "user",
       name: currentUsername,
       avatarUrl: userAvatarUrl,
       content: "",
       attachments: [{ type: "gif", url: gif.url, name: gif.gifLabel }],
     });
+    persistMessage(msg);
     setShowGif(false);
   };
 
   const addCustomEmojiHandler = async () => {
     if (!newEmoji.trim()) return;
+    const emoji = newEmoji.trim();
+    setNewEmoji("");
     try {
-      console.log("[Emoji] Adding custom emoji:", newEmoji.trim());
-      await addCustomEmojiMutation.mutateAsync(newEmoji.trim());
-      setNewEmoji("");
+      await addCustomEmojiMutation.mutateAsync(emoji);
       toast.success("Emoji added!");
     } catch (err) {
-      console.error("[Emoji] Failed to add:", err);
-      toast.error("Failed to add emoji.");
+      console.error("[Emoji] Canister add failed, storing locally:", err);
+      const localEmoji = addLocalEmoji(emoji);
+      setLocalEmojis((prev) => [...prev, localEmoji]);
+      toast.success("Emoji saved locally (canister unavailable).");
     }
   };
 
-  const removeCustomEmoji = async (id: bigint) => {
+  const removeCustomEmoji = async (id: bigint | string) => {
+    if (typeof id === "string") {
+      removeLocalEmoji(id);
+      setLocalEmojis((prev) => prev.filter((e) => e.id !== id));
+      toast.success("Emoji removed.");
+      return;
+    }
     try {
       await deleteCustomEmojiMutation.mutateAsync(id);
       toast.success("Emoji removed.");
@@ -832,14 +873,14 @@ export default function ChatPanel() {
       setTimeout(() => setConfirmClearChat(false), 4000);
       return;
     }
-    try {
-      await clearChatMessagesMutation.mutateAsync();
-      setMessages([]);
-      setConfirmClearChat(false);
-      toast.success("Chat history cleared. Memories preserved.");
-    } catch {
-      toast.error("Failed to clear chat.");
-    }
+    // Clear localStorage immediately
+    const u = getCurrentUser() || "";
+    if (u) clearChatMessages(u);
+    setMessages([]);
+    setConfirmClearChat(false);
+    // Also attempt canister clear
+    clearChatMessagesMutation.mutateAsync().catch(() => {});
+    toast.success("Chat history cleared. Memories preserved.");
   };
 
   const visibleMessages = msgSearch.trim()
@@ -1104,12 +1145,12 @@ export default function ChatPanel() {
           className="absolute bottom-[88px] left-4 z-20 bg-card border border-gold/40 rounded-lg p-3 shadow-2xl"
           style={{ width: 300 }}
         >
-          {/* Custom canister emojis */}
+          {/* Custom emojis: canister + local fallback */}
           <div className="mb-3">
             <p className="text-[9px] font-mono text-gold/50 tracking-widest mb-1">
               CUSTOM EMOJIS
             </p>
-            {(canisterEmojis ?? []).length === 0 ? (
+            {(canisterEmojis ?? []).length === 0 && localEmojis.length === 0 ? (
               <p className="text-[10px] font-mono text-muted-foreground/50 py-1">
                 No custom emojis yet — add one below
               </p>
@@ -1120,6 +1161,28 @@ export default function ChatPanel() {
                     key={emojiEntry.id.toString()}
                     className="relative group"
                   >
+                    <button
+                      type="button"
+                      className="text-xl hover:scale-125 transition-transform w-8 h-8 flex items-center justify-center rounded hover:bg-gold/10"
+                      onClick={() => {
+                        insertEmoji(emojiEntry.emoji);
+                        setShowEmoji(false);
+                      }}
+                    >
+                      {emojiEntry.emoji}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => removeCustomEmoji(emojiEntry.id)}
+                      className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-destructive rounded-full text-destructive-foreground text-[8px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                      data-ocid="chat.delete_button"
+                    >
+                      <X className="w-2 h-2" />
+                    </button>
+                  </div>
+                ))}
+                {localEmojis.map((emojiEntry) => (
+                  <div key={emojiEntry.id} className="relative group">
                     <button
                       type="button"
                       className="text-xl hover:scale-125 transition-transform w-8 h-8 flex items-center justify-center rounded hover:bg-gold/10"
@@ -1195,6 +1258,7 @@ export default function ChatPanel() {
             </p>
           )}
           {(canisterGifs ?? []).length === 0 &&
+          localGifs.length === 0 &&
           !addCustomGifMutation.isPending ? (
             <p className="text-[10px] font-mono text-muted-foreground text-center py-4">
               NO GIFS — ADD BELOW
@@ -1212,6 +1276,32 @@ export default function ChatPanel() {
                       src={gif.url}
                       alt={gif.gifLabel}
                       className="w-full h-full object-cover"
+                    />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => removeGif(gif.id)}
+                    className="absolute top-0.5 right-0.5 w-4 h-4 bg-black/80 border border-destructive/50 rounded text-destructive flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                    data-ocid="chat.delete_button"
+                  >
+                    <X className="w-2.5 h-2.5" />
+                  </button>
+                </div>
+              ))}
+              {localGifs.map((gif) => (
+                <div key={gif.id} className="relative group">
+                  <button
+                    type="button"
+                    onClick={() => insertGif(gif)}
+                    className="w-full aspect-square overflow-hidden rounded border border-gold/20 hover:border-gold/50 transition-colors"
+                  >
+                    <img
+                      src={gif.url}
+                      alt={gif.gifLabel}
+                      className="w-full h-full object-cover"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).style.display = "none";
+                      }}
                     />
                   </button>
                   <button

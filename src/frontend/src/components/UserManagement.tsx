@@ -2,7 +2,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   AlertTriangle,
+  Camera,
   Check,
+  Download,
   Pencil,
   Search,
   Shield,
@@ -10,14 +12,16 @@ import {
   UserPlus,
   X,
 } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   addUser,
   getCredentials,
   getCurrentUser,
+  getUserLoginAvatar,
   isProtectedUser,
   removeUser,
+  setUserLoginAvatar,
   updateUser,
 } from "../utils/localAuth";
 
@@ -35,10 +39,13 @@ export default function UserManagement({ open, onClose }: UserManagementProps) {
   const [editUsername, setEditUsername] = useState("");
   const [editPassword, setEditPassword] = useState("");
   const [, forceUpdate] = useState(0);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const [imageTargetUser, setImageTargetUser] = useState<string | null>(null);
 
   if (!open) return null;
 
   const currentUser = getCurrentUser();
+  const canManageImages = currentUser ? isProtectedUser(currentUser) : false;
   const creds = getCredentials();
   const filtered = search
     ? creds.filter((c) =>
@@ -100,6 +107,38 @@ export default function UserManagement({ open, onClose }: UserManagementProps) {
     } else {
       toast.error("Update failed — username may be taken");
     }
+  };
+
+  const handleSetLoginImage = (username: string) => {
+    setImageTargetUser(username);
+    imageInputRef.current?.click();
+  };
+
+  const handleImageFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !imageTargetUser) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const dataUrl = ev.target?.result as string;
+      setUserLoginAvatar(imageTargetUser, dataUrl);
+      toast.success(`Login image set for "${imageTargetUser}"`);
+      setImageTargetUser(null);
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  };
+
+  const handleExportLoginImage = (username: string) => {
+    const avatar = getUserLoginAvatar(username);
+    if (!avatar) {
+      toast.error(`No login image set for "${username}"`);
+      return;
+    }
+    const a = document.createElement("a");
+    a.href = avatar;
+    a.download = `${username}_login_image.png`;
+    a.click();
+    toast.success(`Login image exported for "${username}"`);
   };
 
   return (
@@ -220,6 +259,31 @@ export default function UserManagement({ open, onClose }: UserManagementProps) {
                     </div>
                   </div>
                   <div className="flex items-center gap-0.5 shrink-0">
+                    {/* Image management buttons for Unity/Syndelious */}
+                    {canManageImages && (
+                      <>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="w-6 h-6 text-muted-foreground hover:text-gold"
+                          onClick={() => handleSetLoginImage(c.username)}
+                          title={`Set login image for ${c.username}`}
+                          data-ocid="user_management.upload_button"
+                        >
+                          <Camera className="w-3 h-3" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="w-6 h-6 text-muted-foreground hover:text-gold"
+                          onClick={() => handleExportLoginImage(c.username)}
+                          title={`Export login image for ${c.username}`}
+                          data-ocid="user_management.secondary_button"
+                        >
+                          <Download className="w-3 h-3" />
+                        </Button>
+                      </>
+                    )}
                     <Button
                       variant="ghost"
                       size="icon"
@@ -301,6 +365,15 @@ export default function UserManagement({ open, onClose }: UserManagementProps) {
           </div>
         </div>
       </div>
+
+      {/* Hidden file input for login image upload */}
+      <input
+        ref={imageInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={handleImageFileChange}
+      />
     </div>
   );
 }

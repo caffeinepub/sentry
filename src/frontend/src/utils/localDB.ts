@@ -3,6 +3,7 @@
  * Global data (memories, rules, knowledge edges, sentry avatar) lives on the ICP canister.
  */
 import type { Memory, PersonalityProfile, TimelineEntry } from "../backend.d";
+import type { ChatMessage } from "../types/sentry";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -159,4 +160,110 @@ export function getUserProfile(username: string): {
   avatarUrl: string;
 } {
   return { username, avatarUrl: getUserAvatar(username) };
+}
+
+// ── CHAT MESSAGES (per-user, persistent) ──────────────────────────────────────
+
+export function getChatMessages(username: string): ChatMessage[] {
+  try {
+    const raw = localStorage.getItem(`sentry_chat_${username}`);
+    if (!raw) return [];
+    return JSON.parse(raw, (_k, v) => {
+      if (typeof v === "string" && v.startsWith("__bigint__"))
+        return BigInt(v.slice(10));
+      return v;
+    });
+  } catch {
+    return [];
+  }
+}
+
+export function saveChatMessages(
+  username: string,
+  messages: ChatMessage[],
+): void {
+  try {
+    localStorage.setItem(
+      `sentry_chat_${username}`,
+      JSON.stringify(messages, (_k, v) =>
+        typeof v === "bigint" ? `__bigint__${v}` : v,
+      ),
+    );
+  } catch {
+    // Ignore storage quota errors
+  }
+}
+
+export function clearChatMessages(username: string): void {
+  localStorage.removeItem(`sentry_chat_${username}`);
+}
+
+// ── LOCAL GIFS (fallback when canister unavailable) ───────────────────────────
+
+export interface LocalGif {
+  id: string;
+  url: string;
+  gifLabel: string;
+  isLocal: true;
+}
+
+export function getLocalGifs(): LocalGif[] {
+  try {
+    const raw = localStorage.getItem("sentry_local_gifs");
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function addLocalGif(url: string, gifLabel: string): LocalGif {
+  const gifs = getLocalGifs();
+  const gif: LocalGif = {
+    id: `local_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+    url,
+    gifLabel,
+    isLocal: true,
+  };
+  gifs.push(gif);
+  localStorage.setItem("sentry_local_gifs", JSON.stringify(gifs));
+  return gif;
+}
+
+export function removeLocalGif(id: string): void {
+  const gifs = getLocalGifs().filter((g) => g.id !== id);
+  localStorage.setItem("sentry_local_gifs", JSON.stringify(gifs));
+}
+
+// ── LOCAL EMOJIS (fallback when canister unavailable) ─────────────────────────
+
+export interface LocalEmoji {
+  id: string;
+  emoji: string;
+  isLocal: true;
+}
+
+export function getLocalEmojis(): LocalEmoji[] {
+  try {
+    const raw = localStorage.getItem("sentry_local_emojis");
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function addLocalEmoji(emoji: string): LocalEmoji {
+  const emojis = getLocalEmojis();
+  const entry: LocalEmoji = {
+    id: `local_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+    emoji,
+    isLocal: true,
+  };
+  emojis.push(entry);
+  localStorage.setItem("sentry_local_emojis", JSON.stringify(emojis));
+  return entry;
+}
+
+export function removeLocalEmoji(id: string): void {
+  const emojis = getLocalEmojis().filter((e) => e.id !== id);
+  localStorage.setItem("sentry_local_emojis", JSON.stringify(emojis));
 }

@@ -47,6 +47,7 @@ export default function MemoryExplorer({ onMemoryClick }: MemoryExplorerProps) {
   const [activeTab, setActiveTab] = useState<FilterTab>("all");
   const [editingId, setEditingId] = useState<bigint | null>(null);
   const [editText, setEditText] = useState("");
+  const [deletedIds, setDeletedIds] = useState<Set<string>>(new Set());
   const avatarInputRef = useRef<HTMLInputElement>(null);
 
   const { data: globalMemories = [] } = useGetMemories(true);
@@ -80,13 +81,20 @@ export default function MemoryExplorer({ onMemoryClick }: MemoryExplorerProps) {
     })),
   ];
 
+  // Filter out locally-deleted items immediately (before refetch)
   const filtered = allMemories.filter((m) => {
+    if (deletedIds.has(m.id.toString())) return false;
     const matchesSearch =
       search === "" || m.text.toLowerCase().includes(search.toLowerCase());
     if (!matchesSearch) return false;
     if (activeTab === "all") return true;
     if (activeTab === "rules") return m.memoryType === "rule";
-    if (activeTab === "knowledge") return m.memoryType === "knowledge";
+    if (activeTab === "knowledge")
+      return (
+        m.memoryType === "knowledge" ||
+        m.memoryType === "fact" ||
+        m.memoryType === "concept"
+      );
     if (activeTab === "history") return m.memoryType === "history";
     if (activeTab === "personal") return m.memoryType === "personal";
     if (activeTab === "user") return m.isGlobal === false;
@@ -95,6 +103,8 @@ export default function MemoryExplorer({ onMemoryClick }: MemoryExplorerProps) {
   });
 
   const handleDelete = async (item: MemoryItem) => {
+    // Immediately hide from UI
+    setDeletedIds((prev) => new Set([...prev, item.id.toString()]));
     try {
       if (item.isRule) {
         await deleteRule.mutateAsync(item.id);
@@ -106,7 +116,8 @@ export default function MemoryExplorer({ onMemoryClick }: MemoryExplorerProps) {
       }
       toast.success("Memory deleted.");
     } catch {
-      toast.error("Delete failed.");
+      // Keep it hidden even if canister delete fails (local-first UX)
+      toast.error("Delete may not have synced to server, but hidden locally.");
     }
   };
 
@@ -365,7 +376,8 @@ export default function MemoryExplorer({ onMemoryClick }: MemoryExplorerProps) {
       {/* Stats */}
       <div className="px-3 py-2 border-t border-border shrink-0">
         <p className="text-[10px] font-mono text-muted-foreground">
-          {allMemories.length} MEMORIES {" // "} {rules.length} RULES
+          {allMemories.length - deletedIds.size} MEMORIES {" // "}{" "}
+          {rules.length} RULES
         </p>
       </div>
     </div>

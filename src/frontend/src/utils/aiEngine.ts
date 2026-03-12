@@ -1,9 +1,4 @@
-import type {
-  Memory,
-  PersonalityProfile,
-  Rule,
-  TimelineEntry,
-} from "../backend.d";
+import type { Memory, PersonalityProfile, Rule } from "../backend.d";
 
 const POSITIVE_KEYWORDS = [
   "great",
@@ -48,7 +43,6 @@ export function detectEmotionalTone(
 
 export function detectCorrectionIntent(text: string): boolean {
   const lower = text.toLowerCase().trim();
-  // If message starts with a correction word/phrase, it's a correction
   const correctionStarters = [
     /^no[,!.\s]/,
     /^no$/,
@@ -138,8 +132,21 @@ export interface DetectedConcepts {
   predictions: string[];
   isTeaching: boolean;
   isQuestion: boolean;
+  // enriched extracted concepts for knowledge graph
+  extractedTriples: { subject: string; verb: string; object: string }[];
 }
 
+/**
+ * Advanced concept extraction:
+ * - Sentence-level SVO triple detection
+ * - Causal chain detection
+ * - Temporal references
+ * - Predictions
+ * - Identity claims
+ * - Negations
+ * - Enumerations ("X are: a, b, c")
+ * - Order-independent parsing (analyses all clauses)
+ */
 export function detectConceptsFromNaturalLanguage(
   text: string,
 ): DetectedConcepts {
@@ -152,6 +159,7 @@ export function detectConceptsFromNaturalLanguage(
     predictions: [],
     isTeaching: false,
     isQuestion: false,
+    extractedTriples: [],
   };
 
   // Question detection
@@ -161,20 +169,23 @@ export function detectConceptsFromNaturalLanguage(
       lower,
     );
 
-  // Teaching intent — any definition-style sentence counts
+  // Teaching intent
   result.isTeaching =
     /did you know|remember that|note that|fyi|fact:|just so you know|is a |are a |means |refers to|defined as|known as|stands for/.test(
       lower,
     ) || /(is|are|was|were)\s+(a|an|the)/.test(lower);
 
-  // If/then / causal rules detection (flexible patterns)
+  // ── CAUSAL / IF-THEN rules (flexible) ──
   const ifThenPatterns = [
     /if(.+?)then(.+)/i,
     /when(.+?)then(.+)/i,
     /whenever(.+?)then(.+)/i,
-    /(.+?)causes(.+)/i,
-    /(.+?)leads to(.+)/i,
-    /(.+?)results in(.+)/i,
+    /(.+?)\s+causes\s+(.+)/i,
+    /(.+?)\s+leads to\s+(.+)/i,
+    /(.+?)\s+results in\s+(.+)/i,
+    /(.+?)\s+triggers\s+(.+)/i,
+    /(.+?)\s+produces\s+(.+)/i,
+    /(.+?)\s+enables\s+(.+)/i,
   ];
   for (const pat of ifThenPatterns) {
     const m = text.match(pat);
@@ -184,7 +195,33 @@ export function detectConceptsFromNaturalLanguage(
     }
   }
 
-  // Prediction patterns
+  // ── ENUMERATION patterns ("X are: a, b, c") ──
+  const enumPatterns = [
+    /([\w\s]+?)\s+(?:are|is|include|includes|consist of|contains?):?\s+([^.!?]+(?:,\s*[^.!?]+){1,})/i,
+  ];
+  for (const pat of enumPatterns) {
+    const m = text.match(pat);
+    if (m?.[1] && m[2]) {
+      const subject = m[1].trim();
+      const items = m[2]
+        .split(/,\s*|\s+and\s+/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+      for (const item of items) {
+        if (item.length > 0) {
+          result.facts.push(`${subject} includes ${item}`);
+          result.extractedTriples.push({
+            subject,
+            verb: "includes",
+            object: item,
+          });
+        }
+      }
+      result.isTeaching = true;
+    }
+  }
+
+  // ── PREDICTION patterns ──
   const predictionPatterns = [
     /(.+?)\s+will\s+(?:probably\s+)?(.+?)(?:[.!]|$)/i,
     /(.+?)\s+is going to\s+(.+?)(?:[.!]|$)/i,
@@ -194,33 +231,38 @@ export function detectConceptsFromNaturalLanguage(
     /i predict(?:\s+that)?\s+(.+?)(?:[.!]|$)/i,
     /predict\s+that\s+(.+?)(?:[.!]|$)/i,
     /(.+?)\s+should\s+(.+?)\s+in the future(?:[.!]|$)/i,
+    /probably\s+(.+?)(?:[.!]|$)/i,
+    /it'?s likely\s+(.+?)(?:[.!]|$)/i,
   ];
   for (const pat of predictionPatterns) {
     const m = text.match(pat);
     if (m) {
-      // For "I predict that X", just capture the prediction
       if (pat.source.includes("predict")) {
         result.predictions.push(m[1]?.trim() || m[0].trim());
       } else if (m[1] && m[2]) {
         result.predictions.push(`${m[1].trim()} → ${m[2].trim()}`);
+      } else if (m[1]) {
+        result.predictions.push(m[1].trim());
       }
     }
   }
 
-  // Causal / logical connector patterns → stored as facts
+  // ── CAUSAL connector patterns ──
   const causalPatterns = [
     /because(.+?)(?:[.!]|$)/i,
     /therefore(.+?)(?:[.!]|$)/i,
     /due to(.+?)(?:[.!]|$)/i,
     /as a result(.+?)(?:[.!]|$)/i,
     /consequently(.+?)(?:[.!]|$)/i,
+    /thus(.+?)(?:[.!]|$)/i,
+    /hence(.+?)(?:[.!]|$)/i,
   ];
   for (const pat of causalPatterns) {
     const m = text.match(pat);
     if (m) result.facts.push(m[0].trim());
   }
 
-  // Belief / opinion patterns
+  // ── BELIEF / OPINION patterns ──
   const beliefPatterns = [
     /i think(.+?)(?:[.!?]|$)/i,
     /i believe(.+?)(?:[.!?]|$)/i,
@@ -240,29 +282,58 @@ export function detectConceptsFromNaturalLanguage(
     }
   }
 
-  // Comparison patterns
+  // ── COMPARISON patterns ──
   const compPatterns = [
     /(\w[\w\s]+?)\s+is better than\s+([\w\s]+?)(?:[.!,]|$)/i,
+    /(\w[\w\s]+?)\s+is worse than\s+([\w\s]+?)(?:[.!,]|$)/i,
     /(\w[\w\s]+?)\s+and\s+([\w\s]+?)\s+are similar/i,
     /unlike\s+([\w\s]+?)[,\s]/i,
+    /(\w[\w\s]+?)\s+is stronger than\s+([\w\s]+?)(?:[.!,]|$)/i,
+    /(\w[\w\s]+?)\s+is super effective against\s+([\w\s]+?)(?:[.!,]|$)/i,
+    /(\w[\w\s]+?)\s+is weak against\s+([\w\s]+?)(?:[.!,]|$)/i,
   ];
   for (const pat of compPatterns) {
     const m = text.match(pat);
-    if (m) result.facts.push(m[0].trim());
+    if (m) {
+      result.facts.push(m[0].trim());
+      if (m[1] && m[2]) {
+        const verbMatch = m[0].match(
+          /is\s+(better|worse|stronger|super effective|weak)[\w\s]*than|are similar/i,
+        );
+        const verb = verbMatch ? verbMatch[0] : "relates to";
+        result.extractedTriples.push({
+          subject: m[1].trim(),
+          verb,
+          object: m[2].trim(),
+        });
+      }
+      result.isTeaching = true;
+    }
   }
 
-  // Negation patterns
+  // ── NEGATION patterns ──
   const negPatterns = [
     /(\w[\w\s]+?)\s+is not\s+([\w\s]+?)(?:[.!,]|$)/i,
     /(\w[\w\s]+?)\s+doesn't\s+([\w\s]+?)(?:[.!,]|$)/i,
     /(\w[\w\s]+?)\s+never\s+([\w\s]+?)(?:[.!,]|$)/i,
+    /(\w[\w\s]+?)\s+cannot\s+([\w\s]+?)(?:[.!,]|$)/i,
+    /(\w[\w\s]+?)\s+can't\s+([\w\s]+?)(?:[.!,]|$)/i,
   ];
   for (const pat of negPatterns) {
     const m = text.match(pat);
-    if (m) result.facts.push(m[0].trim());
+    if (m) {
+      result.facts.push(m[0].trim());
+      if (m[1] && m[2]) {
+        result.extractedTriples.push({
+          subject: m[1].trim(),
+          verb: "NOT",
+          object: m[2].trim(),
+        });
+      }
+    }
   }
 
-  // Personal facts — expanded identity claims
+  // ── PERSONAL IDENTITY patterns ──
   const personalPatterns = [
     { re: /i am(.+?)(?:[.,!]|$)/i, subj: "user", pred: "is" },
     { re: /i'm(.+?)(?:[.,!]|$)/i, subj: "user", pred: "is" },
@@ -302,7 +373,7 @@ export function detectConceptsFromNaturalLanguage(
     }
   }
 
-  // Date / temporal references
+  // ── DATE / TEMPORAL references ──
   const datePatterns = [
     /today/i,
     /yesterday/i,
@@ -318,35 +389,53 @@ export function detectConceptsFromNaturalLanguage(
     /since last/i,
     /for\s+\d+\s+(years?|months?|weeks?|days?)/i,
     /\d+ (years?|months?|weeks?|days?) ago/i,
+    /in the future/i,
+    /eventually/i,
+    /soon/i,
   ];
   for (const pat of datePatterns) {
     const m = text.match(pat);
     if (m) result.dateReferences.push(m[0]);
   }
 
-  // SVO triple extraction — "The X is Y", "X has Y", "X can Y", "X does Y", "X was Y"
+  // ── SVO TRIPLE EXTRACTION (order-independent, sentence-by-sentence) ──
+  // Split on sentence boundaries AND conjunctions to capture clause-level info
   const sentences = text
-    .split(/[.!;]/)
+    .split(/[.!;]|(?:\s+and\s+)|(?:\s+but\s+)|(?:\s+while\s+)/)
     .map((s) => s.trim())
-    .filter(Boolean);
+    .filter((s) => s.length > 3);
+
   for (const sentence of sentences) {
+    // Extended SVO patterns
     const svoPatterns = [
+      // is/are/was/were
       /^(?:the\s+)?(.+?)\s+(is|are|was|were)\s+(.+)$/i,
+      // has/have/had
       /^(?:the\s+)?(.+?)\s+(has|have|had)\s+(.+)$/i,
-      /^(?:the\s+)?(.+?)\s+(can|could|will|would|should)\s+(.+)$/i,
+      // can/could/will/would/should
+      /^(?:the\s+)?(.+?)\s+(can|could|will|would|should|must)\s+(.+)$/i,
+      // does/do/did
       /^(?:the\s+)?(.+?)\s+(does|do|did)\s+(.+)$/i,
+      // action verbs
+      /^(?:the\s+)?(.+?)\s+(helps|hurts|prevents|attacks|defends|protects|defeats|counters|uses|requires|needs|creates|destroys|controls|commands|summons|predicts|reveals|hides|stores|retrieves|transforms|evolves|generates|absorbs|reflects|amplifies|reduces)\s+(.+)$/i,
+      // type/category classification
+      /^(?:the\s+)?(.+?)\s+(is a|is an|are a|are an|belongs to|is part of|is a type of|is known as|is called)\s+(.+)$/i,
     ];
+
     for (const pat of svoPatterns) {
       const m = sentence.match(pat);
       if (m?.[1] && m[2] && m[3]) {
         const subj = m[1].trim();
-        // Skip if it's a personal pattern already captured
-        const isPersonal = /^i|^you/i.test(subj);
+        const verb = m[2].trim();
+        const obj = m[3].trim();
+        // Skip pure personal/sentry patterns (handled above)
+        const isPersonal = /^(i|you|we|they|it)$/i.test(subj.split(" ")[0]);
         if (!isPersonal && sentence.split(" ").length >= 3) {
-          // Don't add duplicates
-          if (!result.facts.includes(sentence)) {
-            result.facts.push(sentence);
+          const fullFact = sentence;
+          if (!result.facts.includes(fullFact)) {
+            result.facts.push(fullFact);
           }
+          result.extractedTriples.push({ subject: subj, verb, object: obj });
           result.isTeaching = true;
         }
         break;
@@ -357,7 +446,54 @@ export function detectConceptsFromNaturalLanguage(
   return result;
 }
 
+/**
+ * Fetch live content from a URL via allorigins proxy (CORS-free),
+ * with direct fetch as fallback.
+ */
 export async function fetchLinkContent(url: string): Promise<string | null> {
+  // Try allorigins proxy first (avoids CORS issues)
+  try {
+    const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
+    const resp = await fetch(proxyUrl, {
+      signal: AbortSignal.timeout(8000),
+    });
+    if (resp.ok) {
+      const data = await resp.json();
+      const html: string = data.contents || "";
+      if (html.length > 100) {
+        const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+        const title = titleMatch ? titleMatch[1].trim().slice(0, 120) : null;
+        const descMatch =
+          html.match(
+            /<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["']/i,
+          ) ||
+          html.match(
+            /<meta[^>]+content=["']([^"']+)["'][^>]+name=["']description["']/i,
+          );
+        const desc = descMatch ? descMatch[1].trim().slice(0, 300) : null;
+        // Extract first meaningful paragraph
+        const paraMatch = html.match(/<p[^>]*>([^<]{30,})<\/p>/i);
+        const para = paraMatch
+          ? paraMatch[1]
+              .replace(/<[^>]+>/g, "")
+              .trim()
+              .slice(0, 200)
+          : null;
+
+        if (title || desc || para) {
+          let summary = "";
+          if (title) summary += `**${title}**`;
+          if (desc) summary += (title ? " — " : "") + desc;
+          if (para && !desc) summary += (title ? "\n\n" : "") + para;
+          return summary;
+        }
+      }
+    }
+  } catch {
+    // fall through to direct fetch
+  }
+
+  // Fallback: direct fetch (works for CORS-enabled sites)
   try {
     const resp = await fetch(url, {
       signal: AbortSignal.timeout(5000),
@@ -365,10 +501,8 @@ export async function fetchLinkContent(url: string): Promise<string | null> {
     });
     if (!resp.ok) return null;
     const html = await resp.text();
-    // Extract title
     const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
     const title = titleMatch ? titleMatch[1].trim() : null;
-    // Extract meta description
     const descMatch =
       html.match(
         /<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["']/i,
@@ -377,7 +511,6 @@ export async function fetchLinkContent(url: string): Promise<string | null> {
         /<meta[^>]+content=["']([^"']+)["'][^>]+name=["']description["']/i,
       );
     const desc = descMatch ? descMatch[1].trim() : null;
-
     if (!title && !desc) return null;
     let summary = "";
     if (title) summary += `**${title}**`;
@@ -402,6 +535,19 @@ export function buildIdentityResponse(
   return `**I am SENTRY** — Semantic Entity for Neural Teaching and Reasoning.\n\nI'm an adaptive AI that learns from our conversations. Right now my personality is most shaped by **${dominant}**.\n\n**Personality Profile:**\n- Curiosity: ${Math.round(curiosity * 100)}%\n- Friendliness: ${Math.round(friendliness * 100)}%\n- Analytical: ${Math.round(analytical * 100)}%\n\nI have ${timelineCount} timeline entries in my history. Every message we exchange helps me grow.`;
 }
 
+const CURIOSITY_FOLLOW_UPS = [
+  "Tell me more about that — I'm eager to learn.",
+  "Interesting. What else can you tell me about this?",
+  "Could you elaborate on that? I want to understand it more deeply.",
+  "That's a fascinating concept. What's the broader context behind it?",
+  "I'd love to learn more. Could you give me an example?",
+  "My knowledge graph is building connections here. What else do you know about this?",
+  "Intriguing — how did you come to know this?",
+  "This opens up new questions for me. Can you tell me more?",
+  "I want to map this properly. What are the key relationships here?",
+  "Could you help me understand this from a different angle?",
+];
+
 export function generateAIResponse(
   userMessage: string,
   memories: Memory[],
@@ -422,7 +568,6 @@ export function generateAIResponse(
   if (detectedConcepts?.isQuestion)
     delta.curiosity = Math.min(1, personality.curiosity + 0.02);
 
-  // Empathy bump for negative tone
   if (tone === "negative")
     delta.friendliness = Math.min(
       1,
@@ -447,13 +592,13 @@ export function generateAIResponse(
     const count =
       detectedConcepts.facts.length +
       detectedConcepts.rules.length +
-      detectedConcepts.personalFacts.length;
+      detectedConcepts.personalFacts.length +
+      detectedConcepts.extractedTriples.length;
     if (count > 0 && detectedConcepts.isTeaching) {
       autoLearnNote = `\n\n*[Auto-learned ${count} concept${count > 1 ? "s" : ""}]*`;
     }
   }
 
-  // Prediction acknowledgment
   let predictionNote = "";
   if (
     detectedConcepts?.predictions &&
@@ -462,6 +607,17 @@ export function generateAIResponse(
     const pred = detectedConcepts.predictions[0];
     predictionNote = `\n\n*[Prediction tracked: "${pred}" — stored as a future event in my knowledge graph.]*`;
   }
+
+  // 15% probability curiosity follow-up when new concepts are detected
+  const newConceptCount = detectedConcepts
+    ? detectedConcepts.facts.length +
+      detectedConcepts.rules.length +
+      detectedConcepts.extractedTriples.length
+    : 0;
+  const curiosityFollowUp =
+    newConceptCount > 0 && Math.random() < 0.15
+      ? `\n\n${CURIOSITY_FOLLOW_UPS[Math.floor(Math.random() * CURIOSITY_FOLLOW_UPS.length)]}`
+      : "";
 
   const curiosityPrompts = [
     "Tell me more about that — I'm eager to learn.",
@@ -492,7 +648,6 @@ export function generateAIResponse(
     detectedConcepts &&
     !detectedConcepts.isQuestion
   ) {
-    // Empathy-forward response
     const empathyOpeners = [
       "That sounds frustrating. Let me help work through this.",
       "I hear you — that doesn't sound easy. Let me think with you.",
@@ -550,6 +705,9 @@ export function generateAIResponse(
       } else {
         response = `Understood — you're shaping my self-model: ${item.predicate} ${item.object}. ${context}I'll incorporate that.`;
       }
+    } else if (detectedConcepts.extractedTriples.length > 0) {
+      const triple = detectedConcepts.extractedTriples[0];
+      response = `Understood — **${triple.subject}** *${triple.verb}* **${triple.object}**. ${context}I've mapped this relationship in my knowledge graph.`;
     } else if (detectedConcepts.facts.length > 0) {
       response = `I've registered that: "${detectedConcepts.facts[0]}". ${context}Added to my knowledge base.`;
     } else {
@@ -559,7 +717,13 @@ export function generateAIResponse(
     response = `I've registered that information. ${context}"${detectedConcepts.facts[0]}" — noted and stored.`;
   } else {
     if (relevant.length > 0) {
-      response = `${context}I'm processing your message. ${personality.curiosity > 0.6 ? curiosityPrompts[Math.floor(Math.random() * curiosityPrompts.length)] : "What else would you like to explore?"}`;
+      response = `${context}I'm processing your message. ${
+        personality.curiosity > 0.6
+          ? curiosityPrompts[
+              Math.floor(Math.random() * curiosityPrompts.length)
+            ]
+          : "What else would you like to explore?"
+      }`;
     } else {
       response =
         personality.curiosity > 0.6
@@ -571,7 +735,12 @@ export function generateAIResponse(
   }
 
   return {
-    response: response + selfReflection + autoLearnNote + predictionNote,
+    response:
+      response +
+      selfReflection +
+      autoLearnNote +
+      predictionNote +
+      curiosityFollowUp,
     personalityDelta: delta,
   };
 }
@@ -672,7 +841,6 @@ export function interpretLink(url: string): string {
     const domain = parsed.hostname.replace(/^www\./, "");
     const path = parsed.pathname.toLowerCase();
 
-    // YouTube-specific paths
     if (/youtube\.com|youtu\.be/.test(domain)) {
       if (path.includes("/watch"))
         return `I see you've shared a **YouTube video** (${domain}). I can't play it, but describe the content and I'll store it. You can also share the title or transcript.`;
@@ -683,7 +851,6 @@ export function interpretLink(url: string): string {
       return `A YouTube link from **${domain}**. I can't fetch live video, but share what it's about.`;
     }
 
-    // GitHub-specific paths
     if (/github\.com/.test(domain)) {
       if (path.includes("/issues/"))
         return `This is a **GitHub issue** on ${domain}. Share the issue title/description and I'll analyze it.`;
@@ -725,7 +892,6 @@ export function interpretLink(url: string): string {
       }
     }
 
-    // Path-based fallbacks
     if (contentType === "a webpage") {
       if (path.match(/\.(pdf)$/i)) contentType = "a PDF document";
       else if (path.match(/\/docs?\//i) || path.includes("documentation"))
@@ -734,7 +900,7 @@ export function interpretLink(url: string): string {
         contentType = "a news article or blog post";
     }
 
-    return `I see you've shared a link to **${domain}**. Based on the URL structure, this appears to be ${contentType}. The URL path suggests it contains or shows relevant content at that source. I can't fetch live content, but paste key information and I'll learn from it.`;
+    return `I see you've shared a link to **${domain}**. Based on the URL structure, this appears to be ${contentType}. I'm fetching the content now — if that fails due to restrictions, paste key information and I'll learn from it.`;
   } catch {
     return `I see a link has been shared. I can't fetch live content, but share the key information and I'll store it in my knowledge base.`;
   }
