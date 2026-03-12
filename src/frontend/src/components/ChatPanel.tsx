@@ -45,6 +45,8 @@ import {
   buildIdentityResponse,
   buildReasoningChain,
   detectConceptsFromNaturalLanguage,
+  detectCorrectionIntent,
+  fetchLinkContent,
   generateAIResponse,
   interpretLink,
   interpretMediaAttachment,
@@ -227,6 +229,23 @@ function AttachmentDisplay({ attachment }: { attachment: Attachment }) {
   );
 }
 
+function getBadgeClass(commandType: string): string {
+  switch (commandType) {
+    case "teach":
+      return "badge-knowledge";
+    case "rule":
+      return "badge-rule";
+    case "history":
+      return "badge-history";
+    case "correction":
+      return "badge-correction";
+    case "prediction":
+      return "badge-prediction";
+    default:
+      return "badge-personal";
+  }
+}
+
 export default function ChatPanel() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -240,6 +259,8 @@ export default function ChatPanel() {
   const [msgSearch, setMsgSearch] = useState("");
   const [showMsgSearch, setShowMsgSearch] = useState(false);
   const [confirmClearChat, setConfirmClearChat] = useState(false);
+  const [awaitingCorrection, setAwaitingCorrection] = useState(false);
+  const [correctionContext, setCorrectionContext] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const sentryAvatarInputRef = useRef<HTMLInputElement>(null);
@@ -310,20 +331,28 @@ export default function ChatPanel() {
   const addGif = async () => {
     if (!newGifUrl.trim()) return;
     try {
+      console.log("[GIF] Adding GIF:", newGifUrl.trim());
       await addCustomGifMutation.mutateAsync({
         url: newGifUrl.trim(),
         gifLabel: newGifLabel.trim() || "GIF",
       });
+      console.log(
+        "[GIF] Successfully added. Current GIF count:",
+        canisterGifs.length + 1,
+      );
       setNewGifUrl("");
       setNewGifLabel("");
-    } catch {
-      toast.error("Failed to add GIF.");
+      toast.success("GIF added successfully!");
+    } catch (err) {
+      console.error("[GIF] Failed to add:", err);
+      toast.error("Failed to add GIF. Please try again.");
     }
   };
 
   const removeGif = async (id: bigint) => {
     try {
       await deleteCustomGifMutation.mutateAsync(id);
+      toast.success("GIF removed.");
     } catch {
       toast.error("Failed to remove GIF.");
     }
@@ -343,9 +372,12 @@ export default function ChatPanel() {
   const addCustomEmojiHandler = async () => {
     if (!newEmoji.trim()) return;
     try {
+      console.log("[Emoji] Adding custom emoji:", newEmoji.trim());
       await addCustomEmojiMutation.mutateAsync(newEmoji.trim());
       setNewEmoji("");
-    } catch {
+      toast.success("Emoji added!");
+    } catch (err) {
+      console.error("[Emoji] Failed to add:", err);
       toast.error("Failed to add emoji.");
     }
   };
@@ -353,6 +385,7 @@ export default function ChatPanel() {
   const removeCustomEmoji = async (id: bigint) => {
     try {
       await deleteCustomEmojiMutation.mutateAsync(id);
+      toast.success("Emoji removed.");
     } catch {
       toast.error("Failed to remove emoji.");
     }
@@ -409,6 +442,65 @@ export default function ChatPanel() {
     try {
       const lower = text.toLowerCase().trim();
       const isAdmin = canTeachGlobal();
+
+      // --- Correction flow ---
+      if (awaitingCorrection) {
+        // This message IS the correction
+        const correction = text;
+        const allMemories = [...globalMemories, ...userMemories];
+        const relevant = allMemories
+          .filter((m) => {
+            const words = correctionContext
+              .toLowerCase()
+              .split(/\s+/)
+              .filter((w) => w.length > 3);
+            return words.some((w) => m.text.toLowerCase().includes(w));
+          })
+          .slice(0, 1);
+
+        // Store the corrected memory
+        await addMemory
+          .mutateAsync({
+            text: correction,
+            memoryType: "knowledge",
+            concepts: correction
+              .split(" ")
+              .filter((w) => w.length > 4)
+              .slice(0, 5),
+            isGlobal: isAdmin,
+          })
+          .catch(() => {});
+
+        setAwaitingCorrection(false);
+        setCorrectionContext("");
+
+        const correctionNote =
+          relevant.length > 0
+            ? ` I've also flagged the related memory: "${relevant[0].text.slice(0, 60)}..."`
+            : "";
+
+        const sentryMsg = addMessage({
+          role: "sentry",
+          content: `Thank you for the correction! I've updated my knowledge. *"${correction}"* has been stored as the correct information.${correctionNote}`,
+          commandType: "correction",
+        });
+        persistMessage(sentryMsg);
+        return;
+      }
+
+      if (detectCorrectionIntent(text)) {
+        // First step: acknowledge and ask for correct info
+        setAwaitingCorrection(true);
+        setCorrectionContext(text);
+        const sentryMsg = addMessage({
+          role: "sentry",
+          content:
+            "I understand — what I said was wrong. Can you tell me the correct information? I'll update my knowledge.",
+          commandType: "correction",
+        });
+        persistMessage(sentryMsg);
+        return;
+      }
 
       if (text.startsWith("TEACH:")) {
         const fact = text.slice(6).trim();
@@ -582,6 +674,21 @@ export default function ChatPanel() {
         }
       }
 
+      // Store predictions as memories
+      for (const pred of detected.predictions) {
+        await addMemory
+          .mutateAsync({
+            text: pred,
+            memoryType: "prediction",
+            concepts: pred
+              .split(" ")
+              .filter((w) => w.length > 4)
+              .slice(0, 5),
+            isGlobal: false,
+          })
+          .catch(() => {});
+      }
+
       await new Promise((res) => setTimeout(res, 600 + Math.random() * 600));
       const allMemories = [...globalMemories, ...userMemories];
       const { response, personalityDelta } = generateAIResponse(
@@ -597,7 +704,13 @@ export default function ChatPanel() {
         updatePersonality.mutate({ ...personality, ...personalityDelta });
       }
 
-      const sentryMsg = addMessage({ role: "sentry", content: response });
+      const commandType =
+        detected.predictions.length > 0 ? "prediction" : undefined;
+      const sentryMsg = addMessage({
+        role: "sentry",
+        content: response,
+        commandType,
+      });
       persistMessage(sentryMsg);
     } finally {
       setIsThinking(false);
@@ -637,7 +750,7 @@ export default function ChatPanel() {
     e.target.value = "";
   };
 
-  const handleLinkAttach = () => {
+  const handleLinkAttach = async () => {
     const url = prompt("Enter URL:");
     if (!url) return;
     const userMsg = addMessage({
@@ -648,13 +761,18 @@ export default function ChatPanel() {
       attachments: [{ type: "link", url, name: url }],
     });
     persistMessage(userMsg);
-    setTimeout(() => {
-      const sentryMsg = addMessage({
-        role: "sentry",
-        content: interpretLink(url),
-      });
-      persistMessage(sentryMsg);
-    }, 400);
+
+    // Try to fetch live content
+    const liveContent = await fetchLinkContent(url);
+    const sentryResponseContent = liveContent
+      ? `I fetched the content from that link. Here's what I found:\n\n${liveContent}\n\nI've stored this in my knowledge graph for our conversation.`
+      : interpretLink(url);
+
+    const sentryMsg = addMessage({
+      role: "sentry",
+      content: sentryResponseContent,
+    });
+    persistMessage(sentryMsg);
   };
 
   const handleUserAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -762,6 +880,11 @@ export default function ChatPanel() {
           </button>
         )}
         <div className="ml-auto flex items-center gap-1">
+          {awaitingCorrection && (
+            <span className="text-[9px] font-mono badge-correction px-1.5 py-0.5 rounded">
+              AWAITING CORRECTION
+            </span>
+          )}
           <button
             type="button"
             onClick={handleClearChat}
@@ -890,15 +1013,7 @@ export default function ChatPanel() {
                   </span>
                   {msg.commandType && (
                     <span
-                      className={`text-[9px] px-1.5 rounded font-mono ${
-                        msg.commandType === "teach"
-                          ? "badge-knowledge"
-                          : msg.commandType === "rule"
-                            ? "badge-rule"
-                            : msg.commandType === "history"
-                              ? "badge-history"
-                              : "badge-personal"
-                      }`}
+                      className={`text-[9px] px-1.5 rounded font-mono ${getBadgeClass(msg.commandType)}`}
                     >
                       {msg.commandType}
                     </span>
@@ -989,33 +1104,46 @@ export default function ChatPanel() {
           className="absolute bottom-[88px] left-4 z-20 bg-card border border-gold/40 rounded-lg p-3 shadow-2xl"
           style={{ width: 300 }}
         >
-          <div className="flex flex-wrap gap-1 mb-3">
-            {canisterEmojis.map((emojiEntry) => (
-              <div key={emojiEntry.id.toString()} className="relative group">
-                <button
-                  type="button"
-                  className="text-xl hover:scale-125 transition-transform w-8 h-8 flex items-center justify-center rounded hover:bg-gold/10"
-                  onClick={() => {
-                    insertEmoji(emojiEntry.emoji);
-                    setShowEmoji(false);
-                  }}
-                >
-                  {emojiEntry.emoji}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => removeCustomEmoji(emojiEntry.id)}
-                  className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-destructive rounded-full text-white text-[8px] items-center justify-center hidden group-hover:flex"
-                  data-ocid="chat.delete_button"
-                >
-                  <X className="w-2 h-2" />
-                </button>
+          {/* Custom canister emojis */}
+          <div className="mb-3">
+            <p className="text-[9px] font-mono text-gold/50 tracking-widest mb-1">
+              CUSTOM EMOJIS
+            </p>
+            {(canisterEmojis ?? []).length === 0 ? (
+              <p className="text-[10px] font-mono text-muted-foreground/50 py-1">
+                No custom emojis yet — add one below
+              </p>
+            ) : (
+              <div className="flex flex-wrap gap-1">
+                {(canisterEmojis ?? []).map((emojiEntry) => (
+                  <div
+                    key={emojiEntry.id.toString()}
+                    className="relative group"
+                  >
+                    <button
+                      type="button"
+                      className="text-xl hover:scale-125 transition-transform w-8 h-8 flex items-center justify-center rounded hover:bg-gold/10"
+                      onClick={() => {
+                        insertEmoji(emojiEntry.emoji);
+                        setShowEmoji(false);
+                      }}
+                    >
+                      {emojiEntry.emoji}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => removeCustomEmoji(emojiEntry.id)}
+                      className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-destructive rounded-full text-white text-[8px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                      data-ocid="chat.delete_button"
+                    >
+                      <X className="w-2 h-2" />
+                    </button>
+                  </div>
+                ))}
               </div>
-            ))}
+            )}
           </div>
-          {canisterEmojis.length > 0 && (
-            <div className="border-t border-gold/20 mb-2" />
-          )}
+          <div className="border-t border-gold/20 mb-2" />
           <div className="flex flex-wrap gap-1 mb-3">
             {EMOJI_LIST.map((emoji) => (
               <button
@@ -1036,7 +1164,7 @@ export default function ChatPanel() {
               type="text"
               value={newEmoji}
               onChange={(e) => setNewEmoji(e.target.value)}
-              placeholder="Add emoji..."
+              placeholder="Add emoji or paste..."
               className="flex-1 bg-black border border-gold/20 text-gold font-mono text-sm px-2 py-1 rounded focus:outline-none focus:border-gold/50 placeholder:text-muted-foreground/30"
               data-ocid="chat.input"
             />
@@ -1061,13 +1189,19 @@ export default function ChatPanel() {
           <p className="text-[10px] font-mono text-gold/60 tracking-widest mb-2">
             GIF LIBRARY
           </p>
-          {canisterGifs.length === 0 ? (
+          {addCustomGifMutation.isPending && (
+            <p className="text-[10px] font-mono text-gold/60 text-center py-1 animate-pulse">
+              ADDING GIF...
+            </p>
+          )}
+          {(canisterGifs ?? []).length === 0 &&
+          !addCustomGifMutation.isPending ? (
             <p className="text-[10px] font-mono text-muted-foreground text-center py-4">
               NO GIFS — ADD BELOW
             </p>
           ) : (
             <div className="grid grid-cols-3 gap-1 mb-3 max-h-40 overflow-y-auto">
-              {canisterGifs.map((gif) => (
+              {(canisterGifs ?? []).map((gif) => (
                 <div key={gif.id.toString()} className="relative group">
                   <button
                     type="button"
@@ -1083,7 +1217,7 @@ export default function ChatPanel() {
                   <button
                     type="button"
                     onClick={() => removeGif(gif.id)}
-                    className="absolute top-0.5 right-0.5 w-4 h-4 bg-black/80 border border-destructive/50 rounded text-destructive hidden group-hover:flex items-center justify-center"
+                    className="absolute top-0.5 right-0.5 w-4 h-4 bg-black/80 border border-destructive/50 rounded text-destructive flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
                     data-ocid="chat.delete_button"
                   >
                     <X className="w-2.5 h-2.5" />
@@ -1111,15 +1245,26 @@ export default function ChatPanel() {
             <button
               type="button"
               onClick={addGif}
-              className="w-full py-1.5 bg-gold/10 border border-gold/30 text-gold text-[10px] font-mono tracking-widest rounded hover:bg-gold/20 transition-colors"
+              disabled={addCustomGifMutation.isPending}
+              className="w-full py-1.5 bg-gold/10 border border-gold/30 text-gold text-[10px] font-mono tracking-widest rounded hover:bg-gold/20 transition-colors disabled:opacity-50"
               data-ocid="chat.primary_button"
             >
-              ADD GIF
+              {addCustomGifMutation.isPending ? "ADDING..." : "ADD GIF"}
             </button>
           </div>
         </div>
       )}
 
+      {awaitingCorrection && (
+        <div className="px-4 py-2 bg-amber-950/40 border-t border-amber-600/40 flex items-center gap-2 shrink-0">
+          <span className="text-[10px] font-mono text-amber-400 tracking-widest animate-pulse">
+            ⟲
+          </span>
+          <span className="text-[10px] font-mono text-amber-400/90 tracking-widest">
+            CORRECTION MODE — Type the correct information and press Enter
+          </span>
+        </div>
+      )}
       <div className="px-4 pb-4 pt-2 shrink-0 border-t border-border">
         <div className="flex gap-2 items-end">
           <Button
@@ -1159,7 +1304,11 @@ export default function ChatPanel() {
             ref={textareaRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Send a message, share a fact, or just chat..."
+            placeholder={
+              awaitingCorrection
+                ? "Type the correct information..."
+                : "Send a message, share a fact, or just chat..."
+            }
             className="flex-1 min-h-[40px] max-h-32 resize-none bg-input border-border text-sm font-mono text-foreground placeholder:text-muted-foreground"
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {

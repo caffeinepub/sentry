@@ -46,6 +46,30 @@ export function detectEmotionalTone(
   return "neutral";
 }
 
+export function detectCorrectionIntent(text: string): boolean {
+  const lower = text.toLowerCase().trim();
+  // If message starts with a correction word/phrase, it's a correction
+  const correctionStarters = [
+    /^no[,!.\s]/,
+    /^no$/,
+    /^nope/,
+    /^wrong/,
+    /^incorrect/,
+    /^that'?s\s+(not\s+right|wrong|incorrect|false|not\s+true)/,
+    /^you'?re\s+wrong/,
+    /^you got that wrong/,
+    /^not\s+true/,
+    /^false[,!.\s]/,
+    /^false$/,
+    /^actually[,!.\s]/,
+    /^actually$/,
+    /^no it'?s/,
+    /^no it is/,
+    /^no,?\s+that'?s/,
+  ];
+  return correctionStarters.some((pat) => pat.test(lower));
+}
+
 export function findRelevantMemories(
   query: string,
   memories: Memory[],
@@ -111,6 +135,7 @@ export interface DetectedConcepts {
   rules: { condition: string; effect: string }[];
   personalFacts: { subject: string; predicate: string; object: string }[];
   dateReferences: string[];
+  predictions: string[];
   isTeaching: boolean;
   isQuestion: boolean;
 }
@@ -124,6 +149,7 @@ export function detectConceptsFromNaturalLanguage(
     rules: [],
     personalFacts: [],
     dateReferences: [],
+    predictions: [],
     isTeaching: false,
     isQuestion: false,
   };
@@ -155,6 +181,29 @@ export function detectConceptsFromNaturalLanguage(
     if (m?.[1] && m[2]) {
       result.rules.push({ condition: m[1].trim(), effect: m[2].trim() });
       result.isTeaching = true;
+    }
+  }
+
+  // Prediction patterns
+  const predictionPatterns = [
+    /(.+?)\s+will\s+(?:probably\s+)?(.+?)(?:[.!]|$)/i,
+    /(.+?)\s+is going to\s+(.+?)(?:[.!]|$)/i,
+    /(.+?)\s+might\s+(.+?)(?:[.!]|$)/i,
+    /(.+?)\s+is likely to\s+(.+?)(?:[.!]|$)/i,
+    /(.+?)\s+is expected to\s+(.+?)(?:[.!]|$)/i,
+    /i predict(?:\s+that)?\s+(.+?)(?:[.!]|$)/i,
+    /predict\s+that\s+(.+?)(?:[.!]|$)/i,
+    /(.+?)\s+should\s+(.+?)\s+in the future(?:[.!]|$)/i,
+  ];
+  for (const pat of predictionPatterns) {
+    const m = text.match(pat);
+    if (m) {
+      // For "I predict that X", just capture the prediction
+      if (pat.source.includes("predict")) {
+        result.predictions.push(m[1]?.trim() || m[0].trim());
+      } else if (m[1] && m[2]) {
+        result.predictions.push(`${m[1].trim()} → ${m[2].trim()}`);
+      }
     }
   }
 
@@ -308,6 +357,37 @@ export function detectConceptsFromNaturalLanguage(
   return result;
 }
 
+export async function fetchLinkContent(url: string): Promise<string | null> {
+  try {
+    const resp = await fetch(url, {
+      signal: AbortSignal.timeout(5000),
+      mode: "cors",
+    });
+    if (!resp.ok) return null;
+    const html = await resp.text();
+    // Extract title
+    const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+    const title = titleMatch ? titleMatch[1].trim() : null;
+    // Extract meta description
+    const descMatch =
+      html.match(
+        /<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["']/i,
+      ) ||
+      html.match(
+        /<meta[^>]+content=["']([^"']+)["'][^>]+name=["']description["']/i,
+      );
+    const desc = descMatch ? descMatch[1].trim() : null;
+
+    if (!title && !desc) return null;
+    let summary = "";
+    if (title) summary += `**${title}**`;
+    if (desc) summary += (title ? " — " : "") + desc;
+    return summary;
+  } catch {
+    return null;
+  }
+}
+
 export function buildIdentityResponse(
   personality: PersonalityProfile,
   timelineCount: number,
@@ -371,6 +451,16 @@ export function generateAIResponse(
     if (count > 0 && detectedConcepts.isTeaching) {
       autoLearnNote = `\n\n*[Auto-learned ${count} concept${count > 1 ? "s" : ""}]*`;
     }
+  }
+
+  // Prediction acknowledgment
+  let predictionNote = "";
+  if (
+    detectedConcepts?.predictions &&
+    detectedConcepts.predictions.length > 0
+  ) {
+    const pred = detectedConcepts.predictions[0];
+    predictionNote = `\n\n*[Prediction tracked: "${pred}" — stored as a future event in my knowledge graph.]*`;
   }
 
   const curiosityPrompts = [
@@ -481,7 +571,7 @@ export function generateAIResponse(
   }
 
   return {
-    response: response + selfReflection + autoLearnNote,
+    response: response + selfReflection + autoLearnNote + predictionNote,
     personalityDelta: delta,
   };
 }

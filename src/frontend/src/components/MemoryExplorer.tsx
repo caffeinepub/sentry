@@ -217,7 +217,11 @@ export default function MemoryExplorer({ onMemoryClick }: MemoryExplorerProps) {
             onClick={() => setActiveTab(tab)}
             className={`px-2 py-0.5 text-[10px] font-mono rounded tracking-widest uppercase transition-colors whitespace-nowrap ${
               activeTab === tab
-                ? "bg-gold/20 text-gold border border-gold/40"
+                ? tab === "global"
+                  ? "bg-gold/20 text-gold border border-gold/50"
+                  : tab === "user"
+                    ? "bg-blue-900/30 text-blue-400 border border-blue-500/40"
+                    : "bg-gold/20 text-gold border border-gold/40"
                 : "text-muted-foreground hover:text-foreground border border-transparent"
             }`}
             data-ocid="memory.tab"

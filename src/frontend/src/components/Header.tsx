@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button";
-import { Cpu, HelpCircle, LogOut, Settings, Users } from "lucide-react";
+import { Brain, Cpu, HelpCircle, LogOut, Settings, Users } from "lucide-react";
 import { getCurrentUser, logout } from "../utils/localAuth";
 
 interface HeaderProps {
@@ -7,6 +7,9 @@ interface HeaderProps {
   onSettingsOpen: () => void;
   onUserManagement: () => void;
   onLogout: () => void;
+  onBrainToggle?: () => void;
+  brainOpen?: boolean;
+  isConnecting?: boolean;
 }
 
 export default function Header({
@@ -14,6 +17,9 @@ export default function Header({
   onSettingsOpen,
   onUserManagement,
   onLogout,
+  onBrainToggle,
+  brainOpen,
+  isConnecting,
 }: HeaderProps) {
   const username = getCurrentUser() || "";
 
@@ -36,6 +42,12 @@ export default function Header({
         <span className="hidden sm:inline-block text-xs text-muted-foreground font-mono tracking-widest ml-2 opacity-60">
           v2.0 NEURAL INTERFACE
         </span>
+        {isConnecting && (
+          <span className="hidden sm:inline-flex items-center gap-1 text-[9px] font-mono text-muted-foreground/50 tracking-widest ml-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-gold/40 animate-pulse" />
+            SYNCING
+          </span>
+        )}
       </div>
 
       <div className="flex items-center gap-1">
@@ -72,6 +84,22 @@ export default function Header({
         >
           <Users className="w-4 h-4" />
         </Button>
+        {onBrainToggle && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className={`w-8 h-8 transition-colors ${
+              brainOpen
+                ? "text-gold bg-gold/10 border border-gold/30"
+                : "text-muted-foreground hover:text-gold"
+            }`}
+            onClick={onBrainToggle}
+            title={brainOpen ? "Hide 3D Brain" : "Show 3D Brain"}
+            data-ocid="brain.toggle"
+          >
+            <Brain className="w-4 h-4" />
+          </Button>
+        )}
         <Button
           variant="ghost"
           size="icon"

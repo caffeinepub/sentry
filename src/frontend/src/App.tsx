@@ -1,5 +1,5 @@
 import { Toaster } from "@/components/ui/sonner";
-import { Brain, ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { motion } from "motion/react";
 import { useState } from "react";
 import BrainVisualization from "./components/BrainVisualization";
@@ -21,25 +21,13 @@ export default function App() {
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
 
+  // Actor initializes in background — never block UI on this
   const { isFetching: actorInitializing } = useActor();
 
   const currentYear = new Date().getFullYear();
 
   if (!loggedIn) {
     return <LoginScreen onLogin={() => setLoggedIn(true)} />;
-  }
-
-  if (actorInitializing) {
-    return (
-      <div className="fixed inset-0 flex items-center justify-center bg-background">
-        <div className="flex flex-col items-center gap-4">
-          <Brain className="w-10 h-10 text-gold animate-pulse" />
-          <span className="text-xs font-mono text-muted-foreground tracking-[0.3em]">
-            CONNECTING TO NEURAL NET...
-          </span>
-        </div>
-      </div>
-    );
   }
 
   return (
@@ -49,9 +37,12 @@ export default function App() {
         onSettingsOpen={() => setSettingsOpen(true)}
         onUserManagement={() => setUserMgmtOpen(true)}
         onLogout={() => setLoggedIn(false)}
+        onBrainToggle={() => setRightOpen((v) => !v)}
+        brainOpen={rightOpen}
+        isConnecting={actorInitializing}
       />
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 overflow-hidden relative">
         {/* Left: Memory Explorer */}
         <motion.div
           initial={false}
