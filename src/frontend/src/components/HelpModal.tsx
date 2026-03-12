@@ -10,6 +10,30 @@ import { X } from "lucide-react";
 
 const SECTIONS = [
   {
+    title: "HOW RULES WORK",
+    content:
+      'Rules are IF...THEN statements that Sentry uses for reasoning and cause-effect chains.\n\nYou can teach them naturally in conversation:\n  "If it rains the ground gets wet"\n  "When fire hits grass it burns"\n\nOr use explicit syntax:\n  IF it rains THEN the ground gets wet\n  IF someone is angry THEN give them space\n\nRules chain together automatically. Sentry can trace them forward (A → B → C) or backwards (WHY does C happen? → traces back to A).\n\nTry: "WHY does the ground get wet" after teaching the rain rule.\n\nRules from different categories can cross-reference each other over time.',
+    color: "badge-rule",
+  },
+  {
+    title: "Knowledge Categories",
+    content:
+      "You can organize what Sentry learns by category. Categories include: Grammar, Powers, Occult, Zener Cards, Hypnosis, Math, Coding, and many more — you can add/edit/delete your own.\n\nTo teach Sentry within a category, just mention it naturally: \"In hypnosis, the subject enters a trance state\" or use TEACH: prefix.\n\nSentry learns how categories relate to each other. If you teach something about 'hypnosis' and something about 'psychological engineering', Sentry tracks that these domains overlap.",
+    color: "badge-knowledge",
+  },
+  {
+    title: "Prediction & 'Might' Logic",
+    content:
+      "Sentry learns to predict outcomes from context. Teach it predictions naturally:\n\n\"Zener cards might predict symbols through intuition\"\n\"Using fire on grass will likely cause burning\"\n\n'Might' signals to Sentry that something is only sometimes true — it stores this as a conditional fact. 'Will' or 'always' signals a stronger rule.\n\nSentry can also predict from patterns: if you've taught it enough related cause-effect chains, it can reason forward to likely outcomes.",
+    color: "badge-prediction",
+  },
+  {
+    title: "Cross-Category Learning",
+    content:
+      "When Sentry learns concepts from multiple categories in the same conversation, it stores relationship edges between those categories. For example, if you discuss both 'astral projection' and 'psychological engineering', Sentry notes the overlap.\n\nThis means over time, Sentry can suggest connections: 'hypnosis connects to psychological engineering because both involve altering mental states'.\n\nYou can ask WHY or ask Sentry to explain how two topics are related.",
+    color: "badge-knowledge",
+  },
+  {
     title: "TEACH: command",
     content:
       "Teach Sentry general knowledge that becomes part of the global knowledge base.\n\nExample: TEACH: The speed of light is approximately 299,792 km/s",

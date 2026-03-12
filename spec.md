@@ -1,36 +1,32 @@
 # Sentry
 
 ## Current State
-Full-featured AI chat app with 3D brain visualization, memory explorer, personality system, teaching/reasoning commands, emoji/gif support, and persistent storage. Black and gold theme enforced. Chat history persists. Memory core accessible on mobile.
+Sentry is a full-featured AI chat app with black/gold theme, teaching commands, 3D brain, memory explorer, category system, GIF/emoji picker, persistent chat, and multi-user auth.
 
 ## Requested Changes (Diff)
 
 ### Add
-- Default/built-in emojis should also be deletable (currently only custom-uploaded ones are)
-- Memory Core panel should display learned concepts (knowledge graph nodes/concepts extracted from conversation)
-- Pronoun/speaker context detection: distinguish who is referred to by me/my/I'm vs they/them vs you/you're/you were and store accordingly
-- "Might" qualifier logic: concepts tagged with "might" are only sometimes true (probabilistic/conditional)
-- Auto-save every 30 seconds (if not already)
-- GIFs uploaded in chat messages should render as animated images (not broken)
+- Help modal: add a clear top-level "HOW RULES WORK" section explaining IF/THEN syntax, chaining, reverse reasoning, and teaching via natural language
+- AI occasionally asks a follow-up question when new concept is learned (10-20% chance)
 
 ### Modify
-- AI concept extraction: improve to handle complex, situational, multi-part concepts in any word order. Support prediction learning (Zener cards, future events, "X is used on Y to do Z", power/effect/target chains). Not just keyword matching.
-- Pronoun resolution: when user says "I", "me", "my", "I'm" → attribute to current user. "you", "you're", "you were" → attribute to Sentry. "they", "them" → third-party entity last mentioned.
-- Reasoning chains: single-step, multi-step, and reverse (effect → cause). AI occasionally asks follow-up questions.
-- Timeline reasoning: highlight relevant knowledge graph nodes from history.
-- Live content fetching: when a URL is shared, fetch and summarize/interpret the page content. When image/file/audio/video is uploaded, interpret it directly (existing feature, ensure it works).
-- Chat history: persists after logout and page refresh unless explicitly cleared (confirm working).
-- Persistent memory: auto-save to localStorage every 30 seconds and on every new concept learned.
+- `main.tsx`: fix CSS import `../index.css` → `./index.css` (recurring bug, must be hardened)
+- `ChatPanel.tsx` / `AttachmentDisplay`: ensure uploaded GIFs render as animated `<img>` tags using the data URL directly; fix blank GIF issue by checking type is `"gif"` and rendering with `<img className="max-w-xs rounded" src={attachment.url} alt="gif" />`
+- `ChatPanel.tsx`: when user sends a message with an image attachment, pass the image data URL to the AI context so the AI's response bubble also shows the image inline (or references it)
+- `aiEngine.ts` `generateAIResponse`: responses must be short, natural, human-like — no meta-commentary like "I've stored that" or "I'm noting this"; just state what Sentry thinks is correct or a natural reply
+- `aiEngine.ts` `generateAIResponse`: when a concept is learned/confirmed, only output the core fact/result Sentry believes is correct (e.g., "Fire beats grass." not "I've learned that fire beats grass and stored it.")
+- `aiEngine.ts` `generateAIResponse`: improve keyword-based memory recall so that when user message contains keywords matching stored memories, Sentry references them naturally in its reply
+- `aiEngine.ts` `interpretMediaAttachment`: for image types, include the image URL in the returned context so the AI message bubble can render it
+- Chat history: verify `localStorage` persistence survives logout and page refresh; ensure `getChatMessages()` is loaded on mount before any canister sync (already partially done — just make sure it doesn't get cleared on logout)
+- Auto-save: ensure auto-save runs every 30 seconds via `setInterval`
 
 ### Remove
-- Nothing removed
+- Any meta-commentary phrases in AI responses like "I've stored that", "I'm noting this", "I've learned", "I'll remember", "I've added this to my knowledge"
 
 ## Implementation Plan
-1. Fix GIF rendering in chat messages - ensure `<img>` tags are used for GIF URLs so animation plays
-2. Make default emoji list deletable - store deletions in localStorage, filter out deleted ones on render
-3. Memory Core learned concepts view - list extracted knowledge graph nodes in the Memory Core panel with search
-4. Pronoun resolution engine - parse messages for first/second/third person pronouns and attribute concepts to correct entity
-5. "Might" qualifier - detect "might", "could", "possibly", "sometimes" and tag those concepts as conditional
-6. Enhanced concept extraction - improve NLP pipeline to handle multi-word, situational, predictive, and chained concepts (who/what/where/when/how/why patterns)
-7. Confirm auto-save every 30 seconds and on concept learning
-8. Confirm chat history persistence and live content fetching
+1. Fix `main.tsx` CSS import to `./index.css`
+2. Update `HelpModal.tsx` — add prominent HOW RULES WORK section at the very top of SECTIONS array
+3. Fix `AttachmentDisplay` in `ChatPanel.tsx` — render GIFs as animated img tags; fix blank GIF
+4. Improve `generateAIResponse` in `aiEngine.ts` — short/human responses, keyword recall, no meta-commentary, occasionally ask follow-up
+5. Ensure chat history persists through logout (do not clear messages on logout)
+6. Verify 30-second auto-save interval is present

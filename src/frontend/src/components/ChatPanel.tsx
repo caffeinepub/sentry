@@ -344,7 +344,15 @@ export default function ChatPanel() {
         timestamp: Number(m.timestamp) / 1_000_000, // nanoseconds → ms
         avatarUrl: "",
       }));
-      setMessages(converted);
+      setMessages((prev) => {
+        // Keep local messages (preserves data URLs for GIFs/images)
+        // Only add truly new messages from canister
+        const existingKeys = new Set(prev.map((m) => `${m.role}:${m.content}`));
+        const newOnes = converted.filter(
+          (m) => !existingKeys.has(`${m.role}:${m.content}`),
+        );
+        return [...prev, ...newOnes];
+      });
       // Also save to localStorage for offline/persistence
       const u = getCurrentUser() || "";
       if (u) saveChatMessages(u, converted);

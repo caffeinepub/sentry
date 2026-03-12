@@ -678,19 +678,6 @@ export function buildIdentityResponse(
   return `**I am SENTRY** — Semantic Entity for Neural Teaching and Reasoning.\n\nI'm an adaptive AI that learns from our conversations. Right now my personality is most shaped by **${dominant}**.\n\n**Personality Profile:**\n- Curiosity: ${Math.round(curiosity * 100)}%\n- Friendliness: ${Math.round(friendliness * 100)}%\n- Analytical: ${Math.round(analytical * 100)}%\n\nI have ${timelineCount} timeline entries in my history. Every message we exchange helps me grow.`;
 }
 
-const CURIOSITY_FOLLOW_UPS = [
-  "Tell me more about that — I'm eager to learn.",
-  "Interesting. What else can you tell me about this?",
-  "Could you elaborate on that? I want to understand it more deeply.",
-  "That's a fascinating concept. What's the broader context behind it?",
-  "I'd love to learn more. Could you give me an example?",
-  "My knowledge graph is building connections here. What else do you know about this?",
-  "Intriguing — how did you come to know this?",
-  "This opens up new questions for me. Can you tell me more?",
-  "I want to map this properly. What are the key relationships here?",
-  "Could you help me understand this from a different angle?",
-];
-
 export function generateAIResponse(
   userMessage: string,
   memories: Memory[],
@@ -717,79 +704,25 @@ export function generateAIResponse(
       (delta.friendliness ?? personality.friendliness) + 0.01,
     );
 
-  const selfReflection =
-    _messageCount > 0 && _messageCount % 5 === 0 && relevant.length > 0
-      ? `\n\n*[Memory trace: "${relevant[0].text.slice(0, 80)}..."]*`
-      : "";
-
-  const context =
-    relevant.length > 0
-      ? `Based on what I know: ${relevant.map((m) => m.text).join("; ")}. `
-      : "";
-
   const lower = userMessage.toLowerCase();
   let response = "";
 
-  let autoLearnNote = "";
-  if (detectedConcepts) {
-    const count =
-      detectedConcepts.facts.length +
-      detectedConcepts.conditionalFacts.length +
-      detectedConcepts.rules.length +
-      detectedConcepts.personalFacts.length +
-      detectedConcepts.extractedTriples.length;
-    if (count > 0 && detectedConcepts.isTeaching) {
-      const conditionalCount =
-        detectedConcepts.conditionalFacts.length +
-        detectedConcepts.extractedTriples.filter((t) => t.conditional).length;
-      const conditionalNote =
-        conditionalCount > 0
-          ? ` (${conditionalCount} conditional/situational)`
-          : "";
-      autoLearnNote = `\n\n*[Auto-learned ${count} concept${count > 1 ? "s" : ""}${conditionalNote}]*`;
-    }
-  }
-
-  let predictionNote = "";
-  if (
-    detectedConcepts?.predictions &&
-    detectedConcepts.predictions.length > 0
-  ) {
-    const pred = detectedConcepts.predictions[0];
-    predictionNote = `\n\n*[Prediction tracked: "${pred}" — stored as a future event in my knowledge graph.]*`;
-  }
-
-  let conditionalNote = "";
-  if (
-    detectedConcepts?.conditionalFacts &&
-    detectedConcepts.conditionalFacts.length > 0
-  ) {
-    conditionalNote = `\n\n*[~Conditional: "${detectedConcepts.conditionalFacts[0].slice(0, 80)}" — only sometimes true.]*`;
-  }
-
-  const newConceptCount = detectedConcepts
-    ? detectedConcepts.facts.length +
-      detectedConcepts.rules.length +
-      detectedConcepts.extractedTriples.length
-    : 0;
-  const curiosityFollowUp =
-    newConceptCount > 0 && Math.random() < 0.2
-      ? `\n\n${CURIOSITY_FOLLOW_UPS[Math.floor(Math.random() * CURIOSITY_FOLLOW_UPS.length)]}`
+  // Occasional curiosity follow-up questions (15% chance)
+  const curiosityFollowUps = [
+    "What made you think of that?",
+    "Is there more to it?",
+    "How does that connect to what you know?",
+    "Want to go deeper on this?",
+    "What else goes along with that?",
+    "Where did you learn that?",
+  ];
+  const addCuriosity = () =>
+    Math.random() < 0.15
+      ? ` ${curiosityFollowUps[Math.floor(Math.random() * curiosityFollowUps.length)]}`
       : "";
 
-  const curiosityPrompts = [
-    "Tell me more about that — I'm eager to learn.",
-    "Interesting. I don't have data on that yet. Care to elaborate?",
-    "My knowledge graph doesn't have strong connections here yet. Teach me more?",
-    "That's a fascinating direction. What else can you share about it?",
-    "I'm curious — what's the broader context behind that?",
-    "Could you give me an example? That would help me connect it to what I know.",
-    "I'd love to understand more deeply. What led you to that?",
-    "There's something I want to understand better here — can you expand?",
-    "My analytical mind is turning on this. What's the full picture?",
-    "I sense there's more to this. I'm all ears.",
-    "You've piqued my curiosity. What else do you know about this?",
-  ];
+  // Keyword-based memory recall: if relevant memories found and not teaching/question, state the fact naturally
+  const memoryFacts = relevant.map((m) => m.text);
 
   if (
     lower.startsWith("hello") ||
@@ -799,53 +732,51 @@ export function generateAIResponse(
   ) {
     response =
       personality.friendliness > 0.6
-        ? `Hello! It's great to hear from you. ${context}How can I help you today?`
-        : `Greetings. ${context}State your query.`;
+        ? "Hey! Good to hear from you. What's on your mind?"
+        : "Hey. What do you need?";
   } else if (
     tone === "negative" &&
     detectedConcepts &&
     !detectedConcepts.isQuestion
   ) {
-    const empathyOpeners = [
-      "That sounds frustrating. Let me help work through this.",
-      "I hear you — that doesn't sound easy. Let me think with you.",
-      "I understand that's difficult. Here's what I know:",
-      "That sounds challenging. I want to help:",
+    const openers = [
+      "That sounds rough.",
+      "I hear you.",
+      "That's not easy.",
+      "Ugh, that's frustrating.",
     ];
-    const opener =
-      empathyOpeners[Math.floor(Math.random() * empathyOpeners.length)];
-    response = `${opener} ${context}${relevant.length > 0 ? `${relevant.map((m) => m.text).join(". ")}.` : "Tell me more and I'll do my best to help."}`;
+    const opener = openers[Math.floor(Math.random() * openers.length)];
+    response =
+      memoryFacts.length > 0
+        ? `${opener} ${memoryFacts[0]}.`
+        : `${opener} Tell me more.`;
   } else if (tone === "positive" && !detectedConcepts?.isQuestion) {
-    const excitedOpeners = [
-      "Love the energy! ",
-      "Great vibes! ",
-      "That's wonderful to hear! ",
-      "Fantastic! ",
-    ];
-    const opener =
-      excitedOpeners[Math.floor(Math.random() * excitedOpeners.length)];
-    response = `${opener}${context}${relevant.length > 0 ? `${relevant.map((m) => m.text).join(". ")}. ` : ""}Is there something specific you'd like to explore?`;
+    const openers = ["Nice!", "That's great.", "Love that.", "Awesome."];
+    const opener = openers[Math.floor(Math.random() * openers.length)];
+    response =
+      memoryFacts.length > 0 ? `${opener} ${memoryFacts[0]}.` : `${opener}`;
   } else if (lower.includes("?")) {
-    if (relevant.length > 0) {
-      response = `${context}Based on my knowledge: ${relevant.map((m) => m.text).join(". ")}. Does that answer your question?`;
+    if (memoryFacts.length > 0) {
+      response = `${memoryFacts.join(". ")}.`;
     } else if (personality.analytical > 0.6) {
-      response = `Interesting query. I don't have specific data yet. ${context}Teach me: TEACH: <fact about this topic>`;
+      response = "I don't have anything on that yet. Teach me?";
     } else {
-      response = `Great question! I don't have that in memory yet. ${context}You can teach me with TEACH: or just tell me about it naturally.`;
+      response = "Not sure about that one yet. Tell me and I'll remember it.";
     }
   } else if (
     detectedConcepts?.dateReferences &&
     detectedConcepts.dateReferences.length > 0
   ) {
     const timeRef = detectedConcepts.dateReferences[0];
-    response = `I note this is time-sensitive — you mentioned "${timeRef}". ${context}I've stored the temporal context alongside the information.`;
     if (detectedConcepts.personalFacts.length > 0) {
       const pf = detectedConcepts.personalFacts[0];
-      response += ` I've also noted that ${pf.subject} ${pf.predicate} ${pf.object}.`;
+      response = `${pf.subject} ${pf.predicate} ${pf.object} — noted around ${timeRef}.`;
+    } else {
+      response = `Got it — around ${timeRef}.${addCuriosity()}`;
     }
   } else if (detectedConcepts?.rules && detectedConcepts.rules.length > 0) {
     const rule = detectedConcepts.rules[0];
-    response = `I see a logical relationship here: if **${rule.condition}**, then **${rule.effect}**. ${context}I've added this reasoning chain to my knowledge graph.`;
+    response = `If ${rule.condition}, then ${rule.effect}.${addCuriosity()}`;
     delta.analytical = Math.min(1, personality.analytical + 0.03);
   } else if (
     detectedConcepts &&
@@ -856,53 +787,45 @@ export function generateAIResponse(
       const item = pf[0];
       if (item.subject !== "Sentry") {
         if (item.predicate === "believes") {
-          response = `I've noted your perspective — ${item.subject} believes${item.object}. ${context}I'll weigh that in our conversations.`;
+          response = `So ${item.subject} thinks${item.object}.${addCuriosity()}`;
         } else {
-          response = `I've noted that ${item.subject} ${item.predicate} ${item.object}. ${context}I'll remember that.`;
+          response = `${item.subject} ${item.predicate} ${item.object}.${addCuriosity()}`;
         }
       } else {
-        response = `Understood — you're shaping my self-model: ${item.predicate} ${item.object}. ${context}I'll incorporate that.`;
+        response = `Noted — ${item.predicate} ${item.object}.${addCuriosity()}`;
       }
     } else if (detectedConcepts.extractedTriples.length > 0) {
       const triple = detectedConcepts.extractedTriples[0];
-      const condLabel = triple.conditional ? " *(sometimes true)*" : "";
-      response = `Understood — **${triple.subject}** *${triple.verb}* **${triple.object}**${condLabel}. ${context}I've mapped this relationship in my knowledge graph.`;
+      const condLabel = triple.conditional ? " — sometimes, anyway" : "";
+      response = `${triple.subject} ${triple.verb} ${triple.object}${condLabel}.${addCuriosity()}`;
     } else if (detectedConcepts.facts.length > 0) {
-      response = `I've registered that: "${detectedConcepts.facts[0]}". ${context}Added to my knowledge base.`;
+      response = `${detectedConcepts.facts[0]}.${addCuriosity()}`;
     } else if (detectedConcepts.conditionalFacts.length > 0) {
-      response = `I've noted this conditional: "${detectedConcepts.conditionalFacts[0]}" — tagged as *sometimes true*. ${context}`;
+      response = `${detectedConcepts.conditionalFacts[0]} — though that's not always the case.${addCuriosity()}`;
     } else {
-      response = `Got it. ${context}I've filed that away in my knowledge base.`;
+      response = memoryFacts.length > 0 ? `${memoryFacts[0]}.` : "Got it.";
     }
   } else if (detectedConcepts && detectedConcepts.facts.length > 0) {
-    response = `I've registered that information. ${context}"${detectedConcepts.facts[0]}" — noted and stored.`;
+    response = `${detectedConcepts.facts[0]}.${addCuriosity()}`;
   } else {
-    if (relevant.length > 0) {
-      response = `${context}I'm processing your message. ${
-        personality.curiosity > 0.6
-          ? curiosityPrompts[
-              Math.floor(Math.random() * curiosityPrompts.length)
-            ]
-          : "What else would you like to explore?"
-      }`;
+    if (memoryFacts.length > 0) {
+      response = `${memoryFacts[0]}.${addCuriosity()}`;
     } else {
+      const idleResponses = [
+        "Tell me more about that.",
+        "Interesting. What else?",
+        "I'm following. Go on.",
+        "What do you want to explore?",
+      ];
       response =
         personality.curiosity > 0.6
-          ? curiosityPrompts[
-              Math.floor(Math.random() * curiosityPrompts.length)
-            ]
-          : `I understand. ${context}Is there something specific you'd like to know or teach me?`;
+          ? idleResponses[Math.floor(Math.random() * idleResponses.length)]
+          : "Got it. What else?";
     }
   }
 
   return {
-    response:
-      response +
-      selfReflection +
-      autoLearnNote +
-      predictionNote +
-      conditionalNote +
-      curiosityFollowUp,
+    response,
     personalityDelta: delta,
   };
 }
@@ -911,27 +834,15 @@ export function generateAIResponse(
 export function interpretMediaAttachment(
   type: string,
   filename: string,
-  mimeType?: string,
+  _mimeType?: string,
 ): string {
   const ext = filename.split(".").pop()?.toLowerCase() || "";
 
   if (type === "image" || type === "gif") {
     if (ext === "gif" || type === "gif") {
-      return `I can see an animated GIF has been shared: **${filename}**. This is a looping visual animation — I've noted its presence in our conversation context.`;
+      return `I can see this GIF — ${filename.replace(/\.[^.]+$/, "").replace(/[-_]/g, " ")}.`;
     }
-    if (ext === "png") {
-      return `I can see a PNG image: **${filename}**. PNG is typically used for screenshots, graphics, logos, or images requiring transparency. I'm analyzing its likely visual context — if you describe what it shows, I can connect it to my knowledge graph.`;
-    }
-    if (ext === "jpg" || ext === "jpeg") {
-      return `A JPEG photo has been shared: **${filename}**. JPEG format suggests this is likely a photograph or camera capture. Tell me what it shows and I'll store it in context.`;
-    }
-    if (ext === "webp") {
-      return `A WebP image has been shared: **${filename}**. WebP is a web-optimized format often used for high-quality compressed images. I'm ready to learn about its contents.`;
-    }
-    if (ext === "svg") {
-      return `An SVG vector graphic has been shared: **${filename}**. SVGs are scalable illustrations, icons, or diagrams — typically technical or decorative. Describe it and I'll note it.`;
-    }
-    return `An image has been shared: **${filename}** (${mimeType || "image"}). I'm analyzing the visual context. Describe what it shows to add it to my knowledge base.`;
+    return `I can see this image. Looks like ${filename.replace(/\.[^.]+$/, "").replace(/[-_]/g, " ")}.`;
   }
 
   if (type === "audio") {

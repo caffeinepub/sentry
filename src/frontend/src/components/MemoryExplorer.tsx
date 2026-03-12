@@ -23,6 +23,7 @@ import {
   useSetSentryAvatar,
   useUpdateMemory,
 } from "../hooks/useQueries";
+import CategoryManager from "./CategoryManager";
 
 function formatTs(ts: bigint) {
   return new Date(Number(ts) / 1_000_000).toLocaleDateString();
@@ -65,6 +66,7 @@ export default function MemoryExplorer({ onMemoryClick }: MemoryExplorerProps) {
   const [editingId, setEditingId] = useState<bigint | null>(null);
   const [editText, setEditText] = useState("");
   const [deletedIds, setDeletedIds] = useState<Set<string>>(new Set());
+  const [showCategories, setShowCategories] = useState(false);
   const avatarInputRef = useRef<HTMLInputElement>(null);
 
   const { data: globalMemories = [] } = useGetMemories(true);
@@ -268,6 +270,22 @@ export default function MemoryExplorer({ onMemoryClick }: MemoryExplorerProps) {
           accept="image/*"
           className="hidden"
           onChange={handleAvatarChange}
+        />
+      </div>
+
+      {/* Categories */}
+      <div className="px-3 pt-3 shrink-0">
+        <button
+          type="button"
+          data-ocid="memory.open_modal_button"
+          onClick={() => setShowCategories(true)}
+          className="w-full mb-2 px-2 py-0.5 text-[10px] font-mono rounded tracking-widest uppercase bg-gold/10 text-gold border border-gold/30 hover:bg-gold/20 transition-colors"
+        >
+          Categories
+        </button>
+        <CategoryManager
+          open={showCategories}
+          onClose={() => setShowCategories(false)}
         />
       </div>
 
