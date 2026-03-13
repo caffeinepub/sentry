@@ -9,6 +9,7 @@ import {
   Settings,
   Users,
 } from "lucide-react";
+import { useEffect, useState } from "react";
 import { getCurrentUser, isClass6, logout } from "../utils/localAuth";
 
 interface HeaderProps {
@@ -20,6 +21,20 @@ interface HeaderProps {
   onBrainToggle?: () => void;
   brainOpen?: boolean;
   isConnecting?: boolean;
+}
+
+function getActiveProfileId(): string {
+  return localStorage.getItem("sentry_active_profile") || "default";
+}
+
+function getActiveAiName(): string {
+  const pid = getActiveProfileId();
+  return localStorage.getItem(`sentry_ai_name_${pid}`) || "SENTRY";
+}
+
+function getActiveAiAvatar(): string {
+  const pid = getActiveProfileId();
+  return localStorage.getItem(`sentry_ai_avatar_${pid}`) || "";
 }
 
 export default function Header({
@@ -35,6 +50,27 @@ export default function Header({
   const username = getCurrentUser() || "";
   const userIsClass6 = isClass6(username);
 
+  const [aiName, setAiName] = useState<string>(getActiveAiName);
+  const [aiAvatar, setAiAvatar] = useState<string>(getActiveAiAvatar);
+
+  useEffect(() => {
+    const refresh = () => {
+      setAiName(getActiveAiName());
+      setAiAvatar(getActiveAiAvatar());
+    };
+    window.addEventListener("sentry_profile_changed", refresh);
+    window.addEventListener("sentry_ai_name_changed", refresh);
+    window.addEventListener("sentry_ai_avatar_changed", refresh);
+    // Poll every 2s as fallback for cases where events aren't fired
+    const poll = setInterval(refresh, 2000);
+    return () => {
+      window.removeEventListener("sentry_profile_changed", refresh);
+      window.removeEventListener("sentry_ai_name_changed", refresh);
+      window.removeEventListener("sentry_ai_avatar_changed", refresh);
+      clearInterval(poll);
+    };
+  }, []);
+
   const handleLogout = () => {
     logout();
     onLogout();
@@ -47,9 +83,18 @@ export default function Header({
     >
       <div className="scanline" />
       <div className="flex items-center gap-2">
-        <Cpu className="w-5 h-5 text-gold" strokeWidth={1.5} />
+        {/* Active AI avatar or default CPU icon */}
+        {aiAvatar ? (
+          <img
+            src={aiAvatar}
+            alt={aiName}
+            className="w-6 h-6 rounded-full object-cover border border-gold/50 shrink-0"
+          />
+        ) : (
+          <Cpu className="w-5 h-5 text-gold" strokeWidth={1.5} />
+        )}
         <span className="font-display font-black tracking-[0.25em] text-gold gold-glow-text text-lg uppercase">
-          SENTRY
+          {aiName}
         </span>
         <span className="hidden sm:inline-block text-xs text-muted-foreground font-mono tracking-widest ml-2 opacity-60">
           v2.0 NEURAL INTERFACE
@@ -137,13 +182,13 @@ export default function Header({
         )}
         <Button
           variant="ghost"
-          size="icon"
-          className="text-muted-foreground hover:text-destructive w-8 h-8"
+          className="text-gold hover:text-gold/80 hover:bg-gold/10 border border-gold/30 hover:border-gold/60 h-8 px-3 font-mono text-[10px] tracking-widest gap-1.5 transition-all"
           onClick={handleLogout}
-          title="Logout"
+          title="Sign Out"
           data-ocid="logout.button"
         >
-          <LogOut className="w-4 h-4" />
+          <LogOut className="w-3.5 h-3.5" />
+          <span>SIGN OUT</span>
         </Button>
       </div>
     </header>

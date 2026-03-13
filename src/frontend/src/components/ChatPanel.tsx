@@ -698,6 +698,14 @@ export default function ChatPanel() {
       setConversations(loadConversations(u));
       setConvId(newConvId);
       setMessages(loadConvMessages(u, newConvId));
+      // Update AI name and avatar for the new profile
+      const newPid = localStorage.getItem("sentry_active_profile") || "default";
+      setAiDisplayName(
+        localStorage.getItem(`sentry_ai_name_${newPid}`) || "SENTRY",
+      );
+      setPerProfileAiAvatar(
+        localStorage.getItem(`sentry_ai_avatar_${newPid}`) || "",
+      );
       // Re-warm IDB cache for new profile messages
       const msgs = loadConvMessages(u, newConvId);
       const idbKeys = msgs.flatMap((m) =>
@@ -718,11 +726,30 @@ export default function ChatPanel() {
       "sentry_profile_changed",
       handleCustomProfileChange,
     );
+    const handleNameChange = () => {
+      const pid = localStorage.getItem("sentry_active_profile") || "default";
+      setAiDisplayName(
+        localStorage.getItem(`sentry_ai_name_${pid}`) || "SENTRY",
+      );
+    };
+    const handleAvatarChange2 = () => {
+      const pid = localStorage.getItem("sentry_active_profile") || "default";
+      setPerProfileAiAvatar(
+        localStorage.getItem(`sentry_ai_avatar_${pid}`) || "",
+      );
+    };
+    window.addEventListener("sentry_ai_name_changed", handleNameChange);
+    window.addEventListener("sentry_ai_avatar_changed", handleAvatarChange2);
     return () => {
       window.removeEventListener("storage", handleStorageChange);
       window.removeEventListener(
         "sentry_profile_changed",
         handleCustomProfileChange,
+      );
+      window.removeEventListener("sentry_ai_name_changed", handleNameChange);
+      window.removeEventListener(
+        "sentry_ai_avatar_changed",
+        handleAvatarChange2,
       );
     };
   }, []);
@@ -1369,8 +1396,16 @@ export default function ChatPanel() {
           try {
             const dataUrl = ev.target?.result as string;
             let type: Attachment["type"] = "file";
-            if (file.type.startsWith("image/gif")) type = "gif";
-            else if (file.type.startsWith("image/")) type = "image";
+            if (
+              file.type.startsWith("image/gif") ||
+              file.name.toLowerCase().endsWith(".gif")
+            )
+              type = "gif";
+            else if (
+              file.type.startsWith("image/") ||
+              /\.(png|jpg|jpeg|webp|svg|bmp)$/i.test(file.name)
+            )
+              type = "image";
             else if (file.type.startsWith("audio/")) type = "audio";
             else if (file.type.startsWith("video/")) type = "video";
 
@@ -1971,8 +2006,8 @@ export default function ChatPanel() {
                   <div
                     className={`px-3 py-2 rounded-lg text-sm leading-relaxed transition-all ${
                       msg.role === "user"
-                        ? "bg-secondary/80 border border-gold/10 text-foreground"
-                        : "sentry-message text-foreground"
+                        ? "bg-black border border-gold/30 text-gold"
+                        : "sentry-message text-gold"
                     }`}
                   >
                     {renderContent(msg.content)}
@@ -2065,6 +2100,9 @@ export default function ChatPanel() {
                   const name = aiNameDraft.trim() || "SENTRY";
                   setAiDisplayName(name);
                   localStorage.setItem(getAiNameKey(), name);
+                  window.dispatchEvent(
+                    new CustomEvent("sentry_ai_name_changed"),
+                  );
                   setEditingAiName(false);
                 }
                 if (e.key === "Escape") setEditingAiName(false);
@@ -2086,6 +2124,9 @@ export default function ChatPanel() {
                   const name = aiNameDraft.trim() || "SENTRY";
                   setAiDisplayName(name);
                   localStorage.setItem(getAiNameKey(), name);
+                  window.dispatchEvent(
+                    new CustomEvent("sentry_ai_name_changed"),
+                  );
                   setEditingAiName(false);
                 }}
                 className="text-xs font-mono text-black bg-gold hover:bg-gold/90 px-3 py-1.5 rounded font-bold"
@@ -2449,7 +2490,7 @@ export default function ChatPanel() {
                 ? "Type the correct information..."
                 : "Send a message, share a fact, or just chat..."
             }
-            className="flex-1 min-h-[40px] max-h-32 resize-none bg-input border-border text-sm font-mono text-foreground placeholder:text-muted-foreground"
+            className="flex-1 min-h-[40px] max-h-32 resize-none bg-input border-border text-sm font-mono text-gold placeholder:text-muted-foreground"
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();

@@ -178,11 +178,7 @@
 /* Sentry message accent */
 .sentry-message {
   border-left: 2px solid oklch(var(--gold) / 0.5);
-  background: linear-gradient(
-    135deg,
-    oklch(0.11 0.004 85) 0%,
-    oklch(0.13 0.008 85) 100%
-  );
+  background: #000000;
 }
 .sentry-message:hover {
   border-left-color: oklch(var(--gold) / 0.8);
@@ -294,6 +290,7 @@ textarea,
 select {
   background-color: black !important;
   color: oklch(var(--gold)) !important;
+  caret-color: oklch(var(--gold)) !important;
   border-color: oklch(var(--gold) / 0.4) !important;
 }
 

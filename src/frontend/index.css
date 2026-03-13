@@ -1,83 +1,318 @@
+@import url('https://fonts.googleapis.com/css2?family=Fleur+De+Leah&family=Bonheur+Royale&family=Puppies+Play&family=Atma:wght@400;600&family=Butcherman&family=Mystery+Quest&family=Flavors&family=Vibes&family=Viaoda+Libre&family=Quintessential&family=Almendra+SC&family=Kings&family=Megrim&display=swap');
+
+@font-face {
+  font-family: "Mona Sans";
+  src: url("/assets/fonts/MonaSans.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Outfit";
+  src: url("/assets/fonts/Outfit.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Geist Mono";
+  src: url("/assets/fonts/GeistMono.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
   :root {
-    --radius: 0.625rem;
-    --background: 1 0 0;
-    --foreground: 0.145 0 0;
-    --card: 1 0 0;
-    --card-foreground: 0.145 0 0;
-    --popover: 1 0 0;
-    --popover-foreground: 0.145 0 0;
-    --primary: 0.205 0 0;
-    --primary-foreground: 0.985 0 0;
-    --secondary: 0.97 0 0;
-    --secondary-foreground: 0.205 0 0;
-    --muted: 0.97 0 0;
-    --muted-foreground: 0.556 0 0;
-    --accent: 0.97 0 0;
-    --accent-foreground: 0.205 0 0;
-    --destructive: 0.577 0.245 27.325;
-    --destructive-foreground: 0.985 0 0;
-    --border: 0.922 0 0;
-    --input: 0.922 0 0;
-    --ring: 0.708 0 0;
-    --chart-1: 0.646 0.222 41.116;
-    --chart-2: 0.6 0.118 184.704;
-    --chart-3: 0.398 0.07 227.392;
-    --chart-4: 0.828 0.189 84.429;
-    --chart-5: 0.769 0.188 70.08;
-    --sidebar: 0.985 0 0;
-    --sidebar-foreground: 0.145 0 0;
-    --sidebar-primary: 0.205 0 0;
-    --sidebar-primary-foreground: 0.985 0 0;
-    --sidebar-accent: 0.97 0 0;
-    --sidebar-accent-foreground: 0.205 0 0;
-    --sidebar-border: 0.922 0 0;
-    --sidebar-ring: 0.708 0 0;
-  }
-
-  .dark {
-    --background: 0.145 0 0;
-    --foreground: 0.985 0 0;
-    --card: 0.205 0 0;
-    --card-foreground: 0.985 0 0;
-    --popover: 0.269 0 0;
-    --popover-foreground: 0.985 0 0;
-    --primary: 0.922 0 0;
-    --primary-foreground: 0.205 0 0;
-    --secondary: 0.269 0 0;
-    --secondary-foreground: 0.985 0 0;
-    --muted: 0.269 0 0;
-    --muted-foreground: 0.708 0 0;
-    --accent: 0.371 0 0;
-    --accent-foreground: 0.985 0 0;
-    --destructive: 0.704 0.191 22.216;
-    --destructive-foreground: 0.205 0 0;
-    --border: 1 0 0 / 10%;
-    --input: 1 0 0 / 15%;
-    --ring: 0.556 0 0;
-    --chart-1: 0.488 0.243 264.376;
-    --chart-2: 0.696 0.17 162.48;
-    --chart-3: 0.769 0.188 70.08;
-    --chart-4: 0.627 0.265 303.9;
-    --chart-5: 0.645 0.246 16.439;
-    --sidebar: 0.205 0 0;
-    --sidebar-foreground: 0.985 0 0;
-    --sidebar-primary: 0.488 0.243 264.376;
-    --sidebar-primary-foreground: 0.985 0 0;
-    --sidebar-accent: 0.269 0 0;
-    --sidebar-accent-foreground: 0.985 0 0;
-    --sidebar-border: 1 0 0 / 10%;
-    --sidebar-ring: 0.439 0 0;
+    --background: 0.08 0.004 85;
+    --foreground: 0.82 0.16 85;
+    --card: 0.11 0.004 85;
+    --card-foreground: 0.72 0.14 85;
+    --popover: 0.1 0.004 85;
+    --popover-foreground: 0.72 0.14 85;
+    --primary: 0.72 0.14 85;
+    --primary-foreground: 0.1 0.005 85;
+    --secondary: 0.16 0.006 85;
+    --secondary-foreground: 0.72 0.14 85;
+    --muted: 0.15 0.004 85;
+    --muted-foreground: 0.55 0.1 85;
+    --accent: 0.82 0.16 85;
+    --accent-foreground: 0.08 0.004 85;
+    --destructive: 0.55 0.22 25;
+    --destructive-foreground: 0.98 0.01 85;
+    --border: 0.22 0.025 85;
+    --input: 0.14 0.004 85;
+    --ring: 0.72 0.14 85;
+    --radius: 0.375rem;
+    --chart-1: 0.72 0.14 85;
+    --chart-2: 0.65 0.16 50;
+    --chart-3: 0.6 0.14 200;
+    --chart-4: 0.65 0.14 120;
+    --chart-5: 0.55 0.18 25;
+    --sidebar: 0.1 0.004 85;
+    --sidebar-foreground: 0.72 0.14 85;
+    --sidebar-primary: 0.72 0.14 85;
+    --sidebar-primary-foreground: 0.1 0.005 85;
+    --sidebar-accent: 0.16 0.006 85;
+    --sidebar-accent-foreground: 0.8 0.01 85;
+    --sidebar-border: 0.22 0.025 85;
+    --sidebar-ring: 0.72 0.14 85;
+    --gold: 0.72 0.14 85;
+    --gold-bright: 0.82 0.16 85;
+    --gold-dim: 0.55 0.1 85;
   }
 
   * {
     @apply border-border;
   }
+
+  html {
+    color-scheme: dark;
+  }
+
   body {
     @apply bg-background text-foreground;
+    font-family: "Outfit", "Mona Sans", sans-serif;
+    font-feature-settings: "rlig" 1, "calt" 1;
+    -webkit-font-smoothing: antialiased;
+    background-color: #000000;
+    background-image: radial-gradient(
+        ellipse 80% 60% at 50% -20%,
+        oklch(0.18 0.06 85 / 0.3),
+        transparent
+      ),
+      repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 39px,
+        oklch(0.72 0.14 85 / 0.03) 39px,
+        oklch(0.72 0.14 85 / 0.03) 40px
+      ),
+      repeating-linear-gradient(
+        90deg,
+        transparent,
+        transparent 39px,
+        oklch(0.72 0.14 85 / 0.03) 39px,
+        oklch(0.72 0.14 85 / 0.03) 40px
+      );
+    background-attachment: fixed;
   }
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: oklch(var(--gold-dim));
+  border-radius: 2px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: oklch(var(--gold));
+}
+
+/* Gold glow utility */
+.gold-glow {
+  box-shadow: 0 0 8px oklch(var(--gold) / 0.4), 0 0 20px oklch(var(--gold) / 0.15);
+}
+.gold-glow-text {
+  text-shadow: 0 0 12px oklch(var(--gold) / 0.6);
+}
+
+/* Scan line animation on header */
+@keyframes scanline {
+  0% { transform: translateY(-100%); }
+  100% { transform: translateY(100vh); }
+}
+.scanline {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(to right, transparent, oklch(var(--gold) / 0.18), transparent);
+  animation: scanline 5s linear infinite;
+  pointer-events: none;
+}
+
+/* Neural ring pulse for empty state */
+@keyframes ringPulse {
+  0% { transform: scale(0.95); opacity: 0.6; }
+  50% { transform: scale(1.05); opacity: 0.2; }
+  100% { transform: scale(0.95); opacity: 0.6; }
+}
+.ring-pulse  { animation: ringPulse 3s ease-in-out infinite; }
+.ring-pulse-2 { animation: ringPulse 3s ease-in-out infinite 0.6s; }
+.ring-pulse-3 { animation: ringPulse 3s ease-in-out infinite 1.2s; }
+
+/* Sentry message accent */
+.sentry-message {
+  border-left: 2px solid oklch(var(--gold) / 0.5);
+  background: #000000;
+}
+.sentry-message:hover {
+  border-left-color: oklch(var(--gold) / 0.8);
+}
+
+/* Terminal cursor */
+@keyframes blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+.cursor::after {
+  content: "_";
+  animation: blink 1s step-start infinite;
+  color: oklch(var(--gold));
+}
+
+/* Badge styles */
+.badge-knowledge {
+  background: oklch(0.72 0.14 85 / 0.15);
+  color: oklch(0.82 0.16 85);
+  border: 1px solid oklch(0.72 0.14 85 / 0.35);
+}
+.badge-rule {
+  background: oklch(0.65 0.16 50 / 0.15);
+  color: oklch(0.75 0.18 50);
+  border: 1px solid oklch(0.65 0.16 50 / 0.35);
+}
+.badge-history {
+  background: oklch(0.6 0.14 200 / 0.15);
+  color: oklch(0.7 0.16 220);
+  border: 1px solid oklch(0.6 0.14 200 / 0.35);
+}
+.badge-personal {
+  background: oklch(0.65 0.14 145 / 0.15);
+  color: oklch(0.72 0.16 145);
+  border: 1px solid oklch(0.65 0.14 145 / 0.35);
+}
+.badge-prediction {
+  background: oklch(0.6 0.18 300 / 0.15);
+  color: oklch(0.72 0.2 300);
+  border: 1px solid oklch(0.6 0.18 300 / 0.35);
+}
+.badge-correction {
+  background: oklch(0.65 0.2 140 / 0.15);
+  color: oklch(0.72 0.22 140);
+  border: 1px solid oklch(0.65 0.2 140 / 0.35);
+}
+
+/* Personality bar glow */
+.personality-track {
+  background: oklch(0.15 0.004 85);
+  position: relative;
+  overflow: hidden;
+}
+.personality-track::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    90deg,
+    transparent 0px,
+    transparent 3px,
+    oklch(0.08 0.004 85) 3px,
+    oklch(0.08 0.004 85) 4px
+  );
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   GLOBAL BUTTON OVERRIDES — all buttons stay pure black
+   ═══════════════════════════════════════════════════════════════ */
+button,
+[role="button"],
+[data-slot="button"],
+input[type="button"],
+input[type="submit"],
+input[type="reset"] {
+  background-color: #000000 !important;
+  color: oklch(var(--gold)) !important;
+}
+
+button:hover,
+[role="button"]:hover,
+[data-slot="button"]:hover,
+button:focus-visible,
+[role="button"]:focus-visible,
+[data-slot="button"]:focus-visible,
+button:active,
+[role="button"]:active,
+[data-slot="button"]:active,
+button:disabled,
+[data-slot="button"]:disabled {
+  background-color: #000000 !important;
+  color: oklch(var(--gold)) !important;
+  box-shadow: 0 0 0 1px oklch(var(--gold) / 0.35) !important;
+}
+
+/* Destructive actions stay red-tinted text on black */
+button.text-destructive,
+button[class*="destructive"],
+[data-slot="button"][class*="destructive"] {
+  color: oklch(0.65 0.22 25) !important;
+  background-color: #000000 !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   GLOBAL INPUT / TEXTAREA / SELECT OVERRIDES
+   ═══════════════════════════════════════════════════════════════ */
+input:not([type="file"]):not([type="range"]):not([type="checkbox"]):not([type="radio"]):not([type="color"]),
+textarea,
+select,
+[data-slot="input"],
+[data-slot="textarea"] {
+  background-color: #000000 !important;
+  color: oklch(var(--gold)) !important;
+  border-color: oklch(var(--gold) / 0.4) !important;
+}
+
+input:not([type="file"]):not([type="range"]):not([type="checkbox"]):not([type="radio"]):not([type="color"]):focus,
+textarea:focus,
+select:focus,
+[data-slot="input"]:focus,
+[data-slot="textarea"]:focus {
+  border-color: oklch(var(--gold) / 0.8) !important;
+  outline: none !important;
+  box-shadow: 0 0 0 2px oklch(var(--gold) / 0.15) !important;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: oklch(var(--gold) / 0.45) !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   FORCE ALL TEXT GOLD
+   ═══════════════════════════════════════════════════════════════ */
+*, *::before, *::after {
+  color: oklch(var(--gold));
+}
+
+/* Muted text gets dimmed gold */
+.text-muted-foreground {
+  color: oklch(var(--gold) / 0.55) !important;
+}
+
+/* Destructive stays red */
+.text-destructive,
+[class*="destructive"] {
+  color: oklch(0.65 0.22 25) !important;
+}
+
+/* Nuclear bg override for any bg- class on buttons */
+button[class*="bg-"],
+[role="button"][class*="bg-"],
+[data-slot="button"][class*="bg-"] {
+  background-color: #000000 !important;
 }

@@ -127,21 +127,21 @@ export default function ImportExportPanel({
           <TabsList className="w-full bg-black/50 border border-gold/20 mb-4">
             <TabsTrigger
               value="data"
-              className="flex-1 text-xs font-mono data-[state=active]:bg-gold data-[state=active]:text-black"
+              className="flex-1 text-xs font-mono text-gold data-[state=active]:bg-black data-[state=active]:border-gold data-[state=active]:border data-[state=active]:text-gold"
               data-ocid="settings.data.tab"
             >
               DATA
             </TabsTrigger>
             <TabsTrigger
               value="theme"
-              className="flex-1 text-xs font-mono data-[state=active]:bg-gold data-[state=active]:text-black"
+              className="flex-1 text-xs font-mono text-gold data-[state=active]:bg-black data-[state=active]:border-gold data-[state=active]:border data-[state=active]:text-gold"
               data-ocid="settings.theme.tab"
             >
               THEME
             </TabsTrigger>
             <TabsTrigger
               value="font"
-              className="flex-1 text-xs font-mono data-[state=active]:bg-gold data-[state=active]:text-black"
+              className="flex-1 text-xs font-mono text-gold data-[state=active]:bg-black data-[state=active]:border-gold data-[state=active]:border data-[state=active]:text-gold"
               data-ocid="settings.font.tab"
             >
               FONT

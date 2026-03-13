@@ -244,8 +244,8 @@ export default function CloneAIDialog({ open, onClose }: CloneAIDialogProps) {
                     key={profile.id}
                     className={`flex items-center gap-2 px-3 py-2 rounded border ${
                       isActive
-                        ? "border-gold bg-gold/5"
-                        : "border-gold/20 bg-secondary/20"
+                        ? "border-gold bg-black"
+                        : "border-gold/20 bg-black/50"
                     }`}
                     data-ocid={
                       idx === 0
