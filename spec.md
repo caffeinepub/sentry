@@ -1,32 +1,32 @@
 # Sentry
 
 ## Current State
-Sentry is a full-featured AI chat app with black/gold theme, memory system, emoji/GIF picker, clone AI dialog, and user management. The emoji picker has no scroll limit. CloneAIDialog only shows a create form with no profile list/select/delete. GIF display on upload is broken (blank). Members image upload is gated to Unity/Syndelious only. Live content fetch hangs without user feedback. Chat history and auto-save are implemented.
+Sentry is a full-stack AI chat/teaching platform with black and gold theme, persistent memory, 3D brain visualization, per-AI profiles, multi-conversation support, GIF/media uploads, access control (Class 6 / trainers), real-time sync via ICP canister, and IndexedDB for large attachments.
 
 ## Requested Changes (Diff)
 
 ### Add
-- Scrollable emoji picker container (max-height with overflow-y-auto wrapping all emoji sections)
-- Profile list in CloneAIDialog: show existing AI profiles with ability to select (activate) and delete each one; display which profile is currently active
-- Member image upload accessible to all users (each member can upload their own profile image), not just privileged users
-- `interpretMediaAttachment` should actually read text file content (for .txt/.json/.csv files uploaded) and display inline; for image/GIF, show inline immediately without blank state
-- Live content fetch: show a loading indicator "Fetching..." in the chat while fetching, with a timeout message if it takes too long or fails (never hang silently)
+- Nothing new structurally
 
 ### Modify
-- Emoji picker: wrap the entire picker div contents in a scrollable area with `max-h-80 overflow-y-auto`
-- GIF rendering in AttachmentDisplay: for freshly uploaded GIFs (data: URLs), the image should render immediately; remove the `[GIF loading…]` blank state for data URLs that are already resolved; only show loading for `idb:` references still being resolved
-- CloneAIDialog: restructure to show (1) list of existing profiles with select/activate and delete buttons, (2) create new clone form below
-- UserManagement: allow any logged-in user to upload their own member image (not just Unity/Syndelious)
-- handleLinkAttach in ChatPanel: show "Fetching link content..." sentry message immediately, then update it with real content or error within 10 seconds; never hang silently
-- handleFileAttach: for text/json/csv files, read the file content and include it in the sentry response
+- **Button backgrounds**: Strengthen CSS so ALL buttons (including those with bg-gold, bg-primary etc.) stay black at all states (default, hover, focus, active). Text stays gold. The `!important` rules must win over Tailwind utility classes.
+- **CloneAIDialog - visible to all**: All logged-in members (not just Class 6) should see the AI profiles list and be able to activate (select) a profile. Only Class 6 can create/delete profiles. Trainers and Class 6 can upload avatar/change name. The tab/button to open this dialog should be accessible to all.
+- **Per-AI profile isolation**: Each profile has its own chat history stored under a profile-specific key. When activating a profile, load its chat history. Trainers and Class 6 can upload avatar and change name for assigned AI profiles.
+- **GIF display**: Fix blank GIF issue. On upload: store full data URL in IndexedDB immediately BEFORE adding message. Use synchronous cache access in `AttachmentDisplay` so the URL is available on first render. On initial load: warm IDB cache for all idb: keys before rendering messages.
+- **Chat history persistence**: Persist across logout/refresh unless explicitly cleared. Already implemented; verify it survives logout cycle.
+- **AI image description**: When image uploaded, use canvas pixel analysis to describe colors, brightness, composition. Do NOT say the filename. Already partially implemented; ensure it always runs for image/gif types.
+- **Code file preview**: Already implemented; ensure HTML/JS/TS/CSS files show editable code panel with preview button.
+- **PDF/doc summarization**: Already implemented; ensure text extraction and summarization runs.
+- **Video/audio summarization**: Already implemented; ensure AI generates response from title/duration/type.
+- **Link fetching**: Already implemented; ensure no silent hangs - always reply with result or error within timeout.
+- **Access control in chat**: When sending a message that teaches global info (TEACH:, IF...THEN..., REMEMBER: global): only Class 6 and trainers for the active AI profile can do this. Non-authorized users get a polite error.
 
 ### Remove
-- Nothing removed
+- Nothing
 
 ## Implementation Plan
-1. ChatPanel.tsx: Add `max-h-80 overflow-y-auto` wrapper around emoji picker inner content sections
-2. AttachmentDisplay: Fix GIF blank by only showing `[GIF loading…]` when URL starts with `idb:` AND resolvedUrl is empty; for data: URLs, resolvedUrl is already set in initial state, no loading needed
-3. CloneAIDialog.tsx: Add profile list with activate/delete; show active profile name
-4. UserManagement.tsx: Remove `canManageImages` gate from own-user image upload (each user can upload their own image)
-5. ChatPanel.tsx handleLinkAttach: Add immediate "Fetching..." message + timeout/error fallback
-6. ChatPanel.tsx handleFileAttach: For text files, read content via FileReader as text and include in sentry response
+1. Strengthen CSS button override in `index.css` to use higher-specificity selectors and attribute selectors that beat Tailwind's bg-gold class.
+2. In `CloneAIDialog`, remove the guard that hides the profiles list from non-Class6 users. Show profiles list to all. Show Activate button to all. Show Delete/Create only to Class 6. Show name/avatar edit to Class 6 and trainers.
+3. In `ChatPanel`, ensure GIF data is in IDB cache synchronously before message is added (cache warming on upload). The `AttachmentDisplay` component should read from the in-memory cache synchronously on first render for gif type.
+4. Verify chat history key is per-profile so switching profiles loads correct history.
+5. Ensure access control check in message processing for teach commands.

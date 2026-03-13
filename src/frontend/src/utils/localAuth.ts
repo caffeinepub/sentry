@@ -56,6 +56,11 @@ export function isProtectedUser(username: string): boolean {
   return lower === "unity" || lower === "syndelious";
 }
 
+export function isClass6(username: string): boolean {
+  const l = username.toLowerCase();
+  return l === "unity" || l === "syndelious";
+}
+
 export function updateUser(
   oldUsername: string,
   newUsername: string,

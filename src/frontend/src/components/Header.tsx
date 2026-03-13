@@ -9,7 +9,7 @@ import {
   Settings,
   Users,
 } from "lucide-react";
-import { getCurrentUser, logout } from "../utils/localAuth";
+import { getCurrentUser, isClass6, logout } from "../utils/localAuth";
 
 interface HeaderProps {
   onHelpOpen: () => void;
@@ -33,6 +33,7 @@ export default function Header({
   isConnecting,
 }: HeaderProps) {
   const username = getCurrentUser() || "";
+  const userIsClass6 = isClass6(username);
 
   const handleLogout = () => {
     logout();
@@ -101,21 +102,23 @@ export default function Header({
           size="icon"
           className="text-muted-foreground hover:text-gold w-8 h-8"
           onClick={onCloneAI}
-          title="Clone AI Profile"
+          title="AI Profiles"
           data-ocid="clone_ai.open_modal_button"
         >
           <Copy className="w-4 h-4" />
         </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="text-muted-foreground hover:text-gold w-8 h-8"
-          onClick={onUserManagement}
-          title="Manage agents"
-          data-ocid="user_management.open_modal_button"
-        >
-          <Users className="w-4 h-4" />
-        </Button>
+        {userIsClass6 && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="text-muted-foreground hover:text-gold w-8 h-8"
+            onClick={onUserManagement}
+            title="Manage agents"
+            data-ocid="user_management.open_modal_button"
+          >
+            <Users className="w-4 h-4" />
+          </Button>
+        )}
         {onBrainToggle && (
           <Button
             variant="ghost"

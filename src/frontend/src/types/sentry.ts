@@ -11,10 +11,11 @@ export interface ChatMessage {
 }
 
 export interface Attachment {
-  type: "image" | "gif" | "audio" | "video" | "file" | "link";
+  type: "image" | "gif" | "audio" | "video" | "file" | "link" | "code";
   url: string;
   name?: string;
   mimeType?: string;
+  codeContent?: string;
 }
 
 export interface SentryState {

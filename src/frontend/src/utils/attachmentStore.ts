@@ -7,6 +7,9 @@ const DB_NAME = "sentry_attachments";
 const STORE_NAME = "attachments";
 const DB_VERSION = 1;
 
+/** In-memory cache so attachments are available synchronously within a session */
+const memoryCache = new Map<string, string>();
+
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
@@ -18,10 +21,16 @@ function openDB(): Promise<IDBDatabase> {
   });
 }
 
+export function getAttachmentFromCache(key: string): string | null {
+  return memoryCache.get(key) ?? null;
+}
+
 export async function storeAttachment(
   key: string,
   dataUrl: string,
 ): Promise<void> {
+  // Seed memory cache immediately (synchronous) — available before IDB write completes
+  memoryCache.set(key, dataUrl);
   try {
     const db = await openDB();
     await new Promise<void>((resolve, reject) => {
@@ -31,25 +40,31 @@ export async function storeAttachment(
       tx.onerror = () => reject(tx.error);
     });
   } catch {
-    // Non-fatal — in-session display still works via React state
+    // Non-fatal — in-session display still works via memory cache
   }
 }
 
 export async function loadAttachment(key: string): Promise<string | null> {
+  // Check memory cache first (synchronous hit)
+  if (memoryCache.has(key)) return memoryCache.get(key)!;
   try {
     const db = await openDB();
-    return await new Promise<string | null>((resolve, reject) => {
+    const result = await new Promise<string | null>((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, "readonly");
       const req = tx.objectStore(STORE_NAME).get(key);
       req.onsuccess = () => resolve((req.result as string) ?? null);
       req.onerror = () => reject(req.error);
     });
+    // Populate cache for future synchronous access
+    if (result) memoryCache.set(key, result);
+    return result;
   } catch {
     return null;
   }
 }
 
 export async function deleteAttachment(key: string): Promise<void> {
+  memoryCache.delete(key);
   try {
     const db = await openDB();
     await new Promise<void>((resolve, reject) => {
@@ -64,6 +79,7 @@ export async function deleteAttachment(key: string): Promise<void> {
 }
 
 export async function clearAllAttachments(): Promise<void> {
+  memoryCache.clear();
   try {
     const db = await openDB();
     await new Promise<void>((resolve, reject) => {

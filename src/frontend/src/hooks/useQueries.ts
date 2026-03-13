@@ -135,13 +135,27 @@ export function useGetKnowledgeEdges() {
 
 export function useGetSentryAvatar() {
   const { actor, isFetching } = useActor();
+  const activeAIName = localStorage.getItem("sentry_active_ai") || "default";
   return useQuery<string>({
-    queryKey: ["sentryAvatar"],
+    queryKey: ["sentryAvatar", activeAIName],
     queryFn: async () => {
-      if (!actor) return localStorage.getItem("sentry_avatar_v2") || "";
+      const localKey =
+        activeAIName !== "default"
+          ? `sentry_avatar_${activeAIName}`
+          : "sentry_avatar_v2";
+      if (!actor)
+        return (
+          localStorage.getItem(localKey) ||
+          localStorage.getItem("sentry_avatar_v2") ||
+          ""
+        );
       const canisterResult = await actor.getSentryAvatar();
       if (canisterResult) return canisterResult;
-      return localStorage.getItem("sentry_avatar_v2") || "";
+      return (
+        localStorage.getItem(localKey) ||
+        localStorage.getItem("sentry_avatar_v2") ||
+        ""
+      );
     },
     enabled: !!actor && !isFetching,
   });
@@ -310,7 +324,13 @@ export function useSetSentryAvatar() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (url: string) => {
-      localStorage.setItem("sentry_avatar_v2", url);
+      const activeAIName =
+        localStorage.getItem("sentry_active_ai") || "default";
+      const localKey =
+        activeAIName !== "default"
+          ? `sentry_avatar_${activeAIName}`
+          : "sentry_avatar_v2";
+      localStorage.setItem(localKey, url);
       if (!actor) return;
       try {
         await actor.setSentryAvatar(url);

@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Check, Copy, Trash2, X } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
-import { getCurrentUser } from "../utils/localAuth";
+import { getCurrentUser, isClass6 } from "../utils/localAuth";
 
 interface AIProfile {
   id: string;
@@ -20,6 +20,7 @@ interface AIProfile {
   rules: unknown[];
   categories: unknown[];
   personality: unknown;
+  globalMemories?: unknown[];
 }
 
 function loadProfiles(): AIProfile[] {
@@ -60,6 +61,21 @@ export default function CloneAIDialog({ open, onClose }: CloneAIDialogProps) {
     () => getActiveProfileId(),
   );
 
+  const currentUser = getCurrentUser() || "";
+  const userIsClass6 = isClass6(currentUser);
+
+  const isTrainerFor = (profileId: string): boolean => {
+    try {
+      const raw = localStorage.getItem(`sentry_ai_trainers_${profileId}`);
+      const trainers: string[] = raw ? JSON.parse(raw) : [];
+      return trainers.some(
+        (t) => t.toLowerCase() === currentUser.toLowerCase(),
+      );
+    } catch {
+      return false;
+    }
+  };
+
   const refreshProfiles = () => {
     setProfiles(loadProfiles());
     setActiveProfileIdState(getActiveProfileId());
@@ -68,10 +84,32 @@ export default function CloneAIDialog({ open, onClose }: CloneAIDialogProps) {
   const handleActivate = (profileId: string) => {
     setActiveProfileId(profileId);
     setActiveProfileIdState(profileId);
+    // Restore this profile's global memories into the active key
+    const profile = profiles.find((p) => p.id === profileId);
+    if (profile) {
+      const profileName =
+        localStorage.getItem(`sentry_ai_name_${profileId}`) || profile.name;
+      localStorage.setItem(`sentry_ai_name_${profileId}`, profileName);
+      // Restore global memories from the profile snapshot
+      if (profile.globalMemories) {
+        localStorage.setItem(
+          "sentry_global_memories",
+          JSON.stringify(profile.globalMemories),
+        );
+      }
+    }
+    // Notify same-tab listeners (storage event only fires for other tabs)
+    window.dispatchEvent(
+      new CustomEvent("sentry_profile_changed", { detail: { profileId } }),
+    );
     toast.success("AI profile activated");
   };
 
   const handleDelete = (profileId: string) => {
+    if (!userIsClass6) {
+      toast.error("Only Class 6 members can delete AI profiles.");
+      return;
+    }
     const updated = profiles.filter((p) => p.id !== profileId);
     saveProfiles(updated);
     if (activeProfileId === profileId) {
@@ -83,6 +121,12 @@ export default function CloneAIDialog({ open, onClose }: CloneAIDialogProps) {
   };
 
   const handleClone = () => {
+    if (!userIsClass6) {
+      toast.error(
+        "Only Class 6 members (Unity, Syndelious) can create new AI templates.",
+      );
+      return;
+    }
     if (!newName.trim()) {
       toast.error("Name required.");
       return;
@@ -96,6 +140,12 @@ export default function CloneAIDialog({ open, onClose }: CloneAIDialogProps) {
         `sentry_user_memories_${username}`,
       );
       const memories = memoriesRaw ? JSON.parse(memoriesRaw) : [];
+
+      // Gather global memories
+      const globalMemoriesRaw = localStorage.getItem("sentry_global_memories");
+      const globalMemories = globalMemoriesRaw
+        ? JSON.parse(globalMemoriesRaw)
+        : [];
 
       // Gather rules (global)
       const rulesRaw = localStorage.getItem("sentry_global_rules");
@@ -116,6 +166,7 @@ export default function CloneAIDialog({ open, onClose }: CloneAIDialogProps) {
         name: newName.trim(),
         createdAt: Date.now(),
         memories,
+        globalMemories,
         rules,
         categories,
         personality,
@@ -147,7 +198,7 @@ export default function CloneAIDialog({ open, onClose }: CloneAIDialogProps) {
           <div className="flex items-center justify-between">
             <DialogTitle className="font-display text-gold tracking-[0.2em] flex items-center gap-2">
               <Copy className="w-4 h-4" />
-              CLONE AI PROFILE
+              AI PROFILE CLONE
             </DialogTitle>
             <Button
               variant="ghost"
@@ -159,6 +210,17 @@ export default function CloneAIDialog({ open, onClose }: CloneAIDialogProps) {
               <X className="w-4 h-4" />
             </Button>
           </div>
+          <p className="text-[10px] font-mono text-gold/60 mt-1">
+            Select your active AI profile below. All members can switch
+            profiles. AI teachers and Class 6 can rename and update profile
+            photos.
+          </p>
+          {!userIsClass6 && (
+            <p className="text-[10px] font-mono text-gold/50 mt-1">
+              CLASS 6 RESTRICTED — You can use and activate profiles, but only
+              Unity or Syndelious can create or delete them.
+            </p>
+          )}
         </DialogHeader>
 
         {/* Existing profiles list */}
@@ -225,15 +287,75 @@ export default function CloneAIDialog({ open, onClose }: CloneAIDialogProps) {
                           ACTIVE
                         </span>
                       )}
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="w-6 h-6 text-muted-foreground hover:text-destructive"
-                        onClick={() => handleDelete(profile.id)}
-                        data-ocid="clone_ai.delete_button"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </Button>
+                      {(userIsClass6 || isTrainerFor(profile.id)) && (
+                        <>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 px-2 text-[9px] font-mono text-gold/70 hover:bg-gold/10"
+                            onClick={() => {
+                              const n = prompt("New AI name:", profile.name);
+                              if (n?.trim()) {
+                                localStorage.setItem(
+                                  `sentry_ai_name_${profile.id}`,
+                                  n.trim(),
+                                );
+                                const updated = profiles.map((p) =>
+                                  p.id === profile.id
+                                    ? { ...p, name: n.trim() }
+                                    : p,
+                                );
+                                saveProfiles(updated);
+                                setProfiles(updated);
+                                toast.success("AI renamed.");
+                              }
+                            }}
+                            data-ocid="clone_ai.edit_button"
+                          >
+                            RENAME
+                          </Button>
+                          <label className="cursor-pointer">
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (!file) return;
+                                const reader = new FileReader();
+                                reader.onload = (ev) => {
+                                  const url = ev.target?.result as string;
+                                  localStorage.setItem(
+                                    `sentry_ai_avatar_${profile.id}`,
+                                    url,
+                                  );
+                                  toast.success("AI avatar updated.");
+                                };
+                                reader.readAsDataURL(file);
+                                e.target.value = "";
+                              }}
+                            />
+                            <span
+                              className="text-[9px] font-mono text-gold/70 px-1.5 py-0.5 rounded hover:bg-gold/10 cursor-pointer"
+                              title="Upload AI avatar"
+                              data-ocid="clone_ai.upload_button"
+                            >
+                              📷
+                            </span>
+                          </label>
+                        </>
+                      )}
+                      {userIsClass6 && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="w-6 h-6 text-muted-foreground hover:text-destructive"
+                          onClick={() => handleDelete(profile.id)}
+                          data-ocid="clone_ai.delete_button"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </Button>
+                      )}
                     </div>
                   </div>
                 );
@@ -242,40 +364,42 @@ export default function CloneAIDialog({ open, onClose }: CloneAIDialogProps) {
           )}
         </div>
 
-        {/* Create new clone */}
-        <div className="border-t border-border pt-4 space-y-3">
-          <p className="text-[10px] font-mono text-gold/60 tracking-widest">
-            CREATE NEW CLONE
-          </p>
-          <p className="text-xs text-muted-foreground font-mono leading-relaxed">
-            Copies memories, rules, and categories — not chat history, name,
-            theme, or avatar.
-          </p>
+        {/* Create new clone — Class 6 only */}
+        {userIsClass6 && (
+          <div className="border-t border-border pt-4 space-y-3">
+            <p className="text-[10px] font-mono text-gold/60 tracking-widest">
+              CREATE NEW CLONE
+            </p>
+            <p className="text-xs text-muted-foreground font-mono leading-relaxed">
+              Copies memories, rules, categories, and global knowledge — not
+              chat history, name, theme, or avatar.
+            </p>
 
-          <div className="space-y-2">
-            <Label className="text-xs font-mono text-gold/70">
-              NEW AI NAME
-            </Label>
-            <Input
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleClone()}
-              className="font-mono text-sm bg-black/50 border-gold/30 text-gold"
-              placeholder="e.g. Sentry-Alpha"
-              data-ocid="clone_ai.input"
-            />
+            <div className="space-y-2">
+              <Label className="text-xs font-mono text-gold/70">
+                NEW AI NAME
+              </Label>
+              <Input
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleClone()}
+                className="font-mono text-sm bg-black/50 border-gold/30 text-gold"
+                placeholder="e.g. Sentry-Alpha"
+                data-ocid="clone_ai.input"
+              />
+            </div>
+
+            <Button
+              className="w-full bg-gold text-black font-mono font-bold hover:bg-gold/90"
+              onClick={handleClone}
+              disabled={cloning}
+              data-ocid="clone_ai.submit_button"
+            >
+              <Copy className="w-4 h-4 mr-2" />
+              {cloning ? "CLONING..." : "CLONE AI"}
+            </Button>
           </div>
-
-          <Button
-            className="w-full bg-gold text-black font-mono font-bold hover:bg-gold/90"
-            onClick={handleClone}
-            disabled={cloning}
-            data-ocid="clone_ai.submit_button"
-          >
-            <Copy className="w-4 h-4 mr-2" />
-            {cloning ? "CLONING..." : "CLONE AI"}
-          </Button>
-        </div>
+        )}
       </DialogContent>
     </Dialog>
   );

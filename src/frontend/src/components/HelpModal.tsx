@@ -10,6 +10,21 @@ import { X } from "lucide-react";
 
 const SECTIONS = [
   {
+    title: "SUGGESTIONS & FEEDBACK",
+    content: null,
+    isLink: true,
+    linkUrl: "https://www.socialcreator.com/xution/?s=326221",
+    linkText:
+      "Have ideas for what topics the AIs should learn? Submit anonymous suggestions here:",
+    color: "badge-knowledge",
+  },
+  {
+    title: "PROFILES & CUSTOMIZATION",
+    content:
+      "Changing your profile pic: Click your avatar next to any of your messages in chat to upload a new one.\n\nChanging the AI's profile pic: Click the AI's avatar next to any Sentry message. Note: Only Class 6 members (Unity, Syndelious) can change the AI's photo.\n\nChanging your display name: Hover over your name in a chat message and click the pencil icon (✎).\n\nChanging the AI's name: Hover over the AI's name in a message and click the pencil icon. Only Class 6 (Unity, Syndelious) can change the AI's name.\n\nCreating new AIs: Only Class 6 (Unity or Syndelious) can create or delete AI templates. All members can use existing AI templates.\n\nAll other settings and info are in the gear icon (⚙) or stored in chat history.",
+    color: "badge-personal",
+  },
+  {
     title: "HOW RULES WORK",
     content:
       'Rules are IF...THEN statements that Sentry uses for reasoning and cause-effect chains.\n\nYou can teach them naturally in conversation:\n  "If it rains the ground gets wet"\n  "When fire hits grass it burns"\n\nOr use explicit syntax:\n  IF it rains THEN the ground gets wet\n  IF someone is angry THEN give them space\n\nRules chain together automatically. Sentry can trace them forward (A → B → C) or backwards (WHY does C happen? → traces back to A).\n\nTry: "WHY does the ground get wet" after teaching the rain rule.\n\nRules from different categories can cross-reference each other over time.',
@@ -102,7 +117,7 @@ const SECTIONS = [
   {
     title: "File Uploads",
     content:
-      "Click the paperclip icon to attach images, GIFs, audio, video, files, or links. Supported formats: images (png/jpg/gif/webp), audio (mp3/wav/ogg), video (mp4/webm), any file.",
+      "Click the paperclip icon to attach images, GIFs, audio, video, files, or links. Supported formats: images (png/jpg/gif/webp), audio (mp3/wav/ogg), video (mp4/webm), any file.\n\nImages: Sentry will describe what it sees (colors, brightness, composition).\nCode files (.html, .js, .ts, etc.): Shown in an editable code panel with copy and preview options.\nVideos: Sentry summarizes based on the title and duration.\nAudio: Sentry reflects on the title and mood.\nPDFs/Docs: Sentry reads and summarizes the content.\nLinks: Sentry fetches and reports what it finds.",
     color: "badge-knowledge",
   },
   {
@@ -110,6 +125,12 @@ const SECTIONS = [
     content:
       "Use the Settings gear icon to access Import/Export. User Data includes your personal memories and personality profile. Global Data includes all shared knowledge and rules.",
     color: "badge-history",
+  },
+  {
+    title: "IMPORTANT DISCLAIMER",
+    content:
+      "AI has unlimited potential. So AI trainers have equal access with class 6 for teaching their AI profile. However. Only class 6 may delete their ai. Which will only ever be for safety reasons. If they'd like to try taking their ai elsewhere. There's a way to import/export its knowledge.",
+    color: "badge-rule",
   },
 ];
 
@@ -158,9 +179,28 @@ export default function HelpModal({ open, onClose }: HelpModalProps) {
                     {s.title}
                   </span>
                 </div>
-                <p className="text-sm text-muted-foreground whitespace-pre-line leading-relaxed">
-                  {s.content}
-                </p>
+                {s.isLink ? (
+                  <div>
+                    <p className="text-sm text-muted-foreground leading-relaxed mb-2">
+                      {s.linkText}
+                    </p>
+                    <a
+                      href={s.linkUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-gold underline text-sm hover:text-gold/80 transition-colors break-all"
+                    >
+                      {s.linkUrl}
+                    </a>
+                    <p className="text-xs text-muted-foreground/60 font-mono mt-2">
+                      Click the link or copy it to your browser.
+                    </p>
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground whitespace-pre-line leading-relaxed">
+                    {s.content}
+                  </p>
+                )}
               </div>
             ))}
           </div>

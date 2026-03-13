@@ -52,6 +52,11 @@ import {
   interpretLink,
   interpretMediaAttachment,
 } from "../utils/aiEngine";
+import {
+  getAttachmentFromCache,
+  loadAttachment,
+  storeAttachment,
+} from "../utils/attachmentStore";
 import { getCurrentUser } from "../utils/localAuth";
 import {
   type LocalEmoji,
@@ -64,7 +69,6 @@ import {
   getLocalGifs,
   removeLocalEmoji,
   removeLocalGif,
-  resolveAttachmentUrls,
   saveChatMessages,
 } from "../utils/localDB";
 import PersonalityBars from "./PersonalityBars";
@@ -194,23 +198,37 @@ function renderContent(content: string) {
 
 function AttachmentDisplay({ attachment }: { attachment: Attachment }) {
   // Resolve idb: references to real data URLs on the fly
-  const [resolvedUrl, setResolvedUrl] = useState<string>(() =>
-    attachment.url?.startsWith("idb:") ? "" : attachment.url || "",
-  );
+  const [resolvedUrl, setResolvedUrl] = useState<string>(() => {
+    if (!attachment.url) return "";
+    if (attachment.url.startsWith("idb:")) {
+      // Check memory cache synchronously first — populated on upload within same session
+      return getAttachmentFromCache(attachment.url.slice(4)) ?? "";
+    }
+    return attachment.url;
+  });
   useEffect(() => {
     if (attachment.url?.startsWith("idb:")) {
-      import("../utils/attachmentStore").then(({ loadAttachment }) => {
-        loadAttachment(attachment.url.slice(4)).then((data) => {
-          if (data) setResolvedUrl(data);
+      const cached = getAttachmentFromCache(attachment.url.slice(4));
+      if (cached) {
+        setResolvedUrl(cached);
+      } else {
+        import("../utils/attachmentStore").then(({ loadAttachment }) => {
+          loadAttachment(attachment.url.slice(4)).then((data) => {
+            if (data) setResolvedUrl(data);
+          });
         });
-      });
+      }
     } else {
       setResolvedUrl(attachment.url || "");
     }
   }, [attachment.url]);
 
   if (attachment.type === "gif") {
-    if (!resolvedUrl)
+    const displayUrl =
+      resolvedUrl ||
+      (attachment.url?.startsWith("data:") ? attachment.url : "") ||
+      "";
+    if (!displayUrl)
       return (
         <span className="text-xs text-muted-foreground font-mono italic">
           [GIF loading…]
@@ -218,7 +236,7 @@ function AttachmentDisplay({ attachment }: { attachment: Attachment }) {
       );
     return (
       <img
-        src={resolvedUrl}
+        src={displayUrl}
         alt={attachment.name || "GIF"}
         loading="eager"
         decoding="async"
@@ -311,18 +329,18 @@ export default function ChatPanel() {
     return getChatMessages(u);
   });
 
-  // Resolve idb: attachment references back to real data URLs on initial load
+  // Warm the IDB memory cache for all idb: attachment keys on initial load
+  // (does NOT modify messages state — AttachmentDisplay resolves lazily per item)
   useEffect(() => {
-    setMessages((prev) => {
-      const hasIdb = prev.some((m) =>
-        m.attachments?.some((a) => a.url?.startsWith("idb:")),
-      );
-      if (!hasIdb) return prev;
-      resolveAttachmentUrls(prev).then((resolved) => {
-        setMessages(resolved);
-      });
-      return prev; // keep current state until async resolves
-    });
+    const initialMessages = getChatMessages(getCurrentUser() || "");
+    const idbKeys = initialMessages.flatMap((m) =>
+      (m.attachments || [])
+        .filter((a) => a.url?.startsWith("idb:"))
+        .map((a) => a.url.slice(4)),
+    );
+    for (const key of idbKeys) {
+      loadAttachment(key); // seeds memoryCache asynchronously
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const [input, setInput] = useState("");
@@ -361,6 +379,18 @@ export default function ChatPanel() {
       }
     },
   );
+
+  const [aiDisplayName, setAiDisplayName] = useState<string>(() => {
+    return localStorage.getItem("sentry_ai_name") || "SENTRY";
+  });
+  const [userDisplayName, setUserDisplayName] = useState<string>(() => {
+    const u = getCurrentUser() || "";
+    return localStorage.getItem(`sentry_display_name_${u}`) || u;
+  });
+  const [editingAiName, setEditingAiName] = useState(false);
+  const [editingUserName, setEditingUserName] = useState(false);
+  const [aiNameDraft, setAiNameDraft] = useState("");
+  const [userNameDraft, setUserNameDraft] = useState("");
 
   const { data: globalMemories = [] } = useGetMemories(true);
   const { data: userMemories = [] } = useGetUserMemories();
@@ -934,46 +964,69 @@ export default function ChatPanel() {
   const handleFileAttach = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     for (const file of files) {
+      const isTextFile = /\.(txt|md|json|csv|js|ts|py|rb|html|css|xml)$/i.test(
+        file.name,
+      );
       const reader = new FileReader();
+      reader.onerror = () => {
+        toast.error(`Failed to read file: ${file.name}`);
+      };
       reader.onload = async (ev) => {
-        const dataUrl = ev.target?.result as string;
-        let type: Attachment["type"] = "file";
-        if (file.type.startsWith("image/gif")) type = "gif";
-        else if (file.type.startsWith("image/")) type = "image";
-        else if (file.type.startsWith("audio/")) type = "audio";
-        else if (file.type.startsWith("video/")) type = "video";
-
-        // Keep the full data URL in memory so GIF/image shows immediately.
-        const attUrl = dataUrl;
-
-        const userMsg = addMessage({
-          role: "user",
-          name: currentUsername,
-          avatarUrl: userAvatarUrl,
-          content: "",
-          attachments: [
-            { type, url: attUrl, name: file.name, mimeType: file.type },
-          ],
-        });
-
-        // Pre-store in IndexedDB with the EXACT key saveChatMessages will use,
-        // ensuring data is in IDB before the state update triggers saveChatMessages.
         try {
-          const { storeAttachment } = await import("../utils/attachmentStore");
-          const idbKey = `att_${userMsg.id}_${file.name}`;
-          await storeAttachment(idbKey, dataUrl);
-        } catch {
-          // IndexedDB unavailable — data URL still works in-session
-        }
+          const dataUrl = ev.target?.result as string;
+          let type: Attachment["type"] = "file";
+          if (file.type.startsWith("image/gif")) type = "gif";
+          else if (file.type.startsWith("image/")) type = "image";
+          else if (file.type.startsWith("audio/")) type = "audio";
+          else if (file.type.startsWith("video/")) type = "video";
 
-        persistMessage(userMsg);
-        setTimeout(() => {
-          const sentryMsg = addMessage({
-            role: "sentry",
-            content: interpretMediaAttachment(type, file.name, file.type),
+          // Store in IDB for persistence on page reload (fire-and-forget).
+          // We use the full dataUrl directly in the message for immediate display.
+          const tempId = crypto.randomUUID();
+          const idbKey = `att_${tempId}_${file.name}`;
+          storeAttachment(idbKey, dataUrl).catch(console.warn);
+
+          const userMsg = addMessage({
+            role: "user",
+            name: currentUsername,
+            avatarUrl: userAvatarUrl,
+            content: "",
+            attachments: [
+              {
+                type,
+                url: dataUrl,
+                name: file.name,
+                mimeType: file.type,
+              },
+            ],
           });
-          persistMessage(sentryMsg);
-        }, 400);
+          persistMessage(userMsg);
+
+          // For text files, read content and show it directly
+          if (isTextFile) {
+            const textReader = new FileReader();
+            textReader.onload = (te) => {
+              const text = ((te.target?.result as string) || "").slice(0, 800);
+              const sentryMsg = addMessage({
+                role: "sentry",
+                content: `**${file.name}**\n\n${text}${text.length === 800 ? "…" : ""}`,
+              });
+              persistMessage(sentryMsg);
+            };
+            textReader.readAsText(file);
+          } else {
+            setTimeout(() => {
+              const sentryMsg = addMessage({
+                role: "sentry",
+                content: interpretMediaAttachment(type, file.name, file.type),
+              });
+              persistMessage(sentryMsg);
+            }, 400);
+          }
+        } catch (err) {
+          console.error("[attach] handleFileAttach error:", err);
+          toast.error(`Could not attach ${file.name}`);
+        }
       };
       reader.readAsDataURL(file);
     }
@@ -982,27 +1035,59 @@ export default function ChatPanel() {
 
   const handleLinkAttach = async () => {
     const url = prompt("Enter URL:");
-    if (!url) return;
+    if (!url?.trim()) return;
+    const trimmedUrl = url.trim();
+
     const userMsg = addMessage({
       role: "user",
       name: currentUsername,
       avatarUrl: userAvatarUrl,
       content: "",
-      attachments: [{ type: "link", url, name: url }],
+      attachments: [{ type: "link", url: trimmedUrl, name: trimmedUrl }],
     });
     persistMessage(userMsg);
 
-    // Try to fetch live content
-    const liveContent = await fetchLinkContent(url);
-    const sentryResponseContent = liveContent
-      ? `I fetched the content from that link. Here's what I found:\n\n${liveContent}\n\nI've stored this in my knowledge graph for our conversation.`
-      : interpretLink(url);
-
-    const sentryMsg = addMessage({
+    // Add a placeholder message immediately so the UI doesn't hang silently
+    const fetchingMsg = addMessage({
       role: "sentry",
-      content: sentryResponseContent,
+      content: "Looking at that link…",
     });
-    persistMessage(sentryMsg);
+    persistMessage(fetchingMsg);
+
+    let reply = "";
+    try {
+      const liveContent = await Promise.race([
+        fetchLinkContent(trimmedUrl),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 10000)),
+      ]);
+      if (liveContent) {
+        reply = liveContent.slice(0, 600);
+      } else {
+        reply =
+          interpretLink(trimmedUrl) ||
+          "I couldn't pull content from that link — it may be blocked or require login.";
+      }
+    } catch {
+      reply =
+        interpretLink(trimmedUrl) ||
+        "Couldn't reach that link. It may be offline or blocked.";
+    }
+
+    // Replace the placeholder message with the real reply
+    setMessages((prev) =>
+      prev.map((m) => (m.id === fetchingMsg.id ? { ...m, content: reply } : m)),
+    );
+    // Persist the updated messages
+    const u = getCurrentUser() || "";
+    if (u) {
+      // messages state update is async; persist on next tick
+      setTimeout(() => {
+        setMessages((prev) => {
+          saveChatMessages(u, prev);
+          return prev;
+        });
+      }, 50);
+    }
   };
 
   const handleUserAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1157,7 +1242,7 @@ export default function ChatPanel() {
                 </div>
                 <div className="text-center">
                   <p className="text-2xl font-display font-black tracking-[0.3em] text-gold gold-glow-text mb-1">
-                    SENTRY
+                    {aiDisplayName.toUpperCase()}
                   </p>
                   <p className="text-[10px] font-mono text-muted-foreground/60 tracking-[0.2em]">
                     NEURAL INTERFACE READY
@@ -1178,7 +1263,7 @@ export default function ChatPanel() {
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.25 }}
-              className="flex gap-3 flex-row"
+              className="flex gap-3 flex-row group/msg"
             >
               <button
                 type="button"
@@ -1234,9 +1319,29 @@ export default function ChatPanel() {
                         : "text-muted-foreground"
                     }`}
                   >
-                    {msg.role === "sentry"
-                      ? "SENTRY"
-                      : (msg.name || "USER").toUpperCase()}
+                    <span className="flex items-center gap-1">
+                      {msg.role === "sentry"
+                        ? aiDisplayName.toUpperCase()
+                        : (msg.name || userDisplayName || "USER").toUpperCase()}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (msg.role === "sentry") {
+                            setAiNameDraft(aiDisplayName);
+                            setEditingAiName(true);
+                          } else {
+                            setUserNameDraft(
+                              userDisplayName || msg.name || "USER",
+                            );
+                            setEditingUserName(true);
+                          }
+                        }}
+                        className="opacity-0 group-hover/msg:opacity-60 hover:!opacity-100 transition-opacity text-muted-foreground hover:text-gold"
+                        aria-label="Edit name"
+                      >
+                        ✎
+                      </button>
+                    </span>
                   </span>
                   <span className="text-[9px] text-muted-foreground/50 font-mono">
                     {new Date(msg.timestamp).toLocaleTimeString()}
@@ -1328,125 +1433,234 @@ export default function ChatPanel() {
         onHighlightNodes={() => {}}
       />
 
+      {/* AI name edit modal */}
+      {editingAiName && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center"
+          style={{ background: "oklch(0 0 0 / 0.7)" }}
+        >
+          <div className="bg-card border border-gold/40 rounded-lg p-4 shadow-2xl w-72">
+            <p className="text-[10px] font-mono text-gold/60 tracking-widest mb-3">
+              RENAME AI
+            </p>
+            <input
+              type="text"
+              value={aiNameDraft}
+              onChange={(e) => setAiNameDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  const name = aiNameDraft.trim() || "SENTRY";
+                  setAiDisplayName(name);
+                  localStorage.setItem("sentry_ai_name", name);
+                  setEditingAiName(false);
+                }
+                if (e.key === "Escape") setEditingAiName(false);
+              }}
+              className="w-full bg-input border border-gold/30 rounded px-3 py-2 text-gold font-mono text-sm focus:outline-none focus:border-gold mb-3"
+              placeholder="SENTRY"
+            />
+            <div className="flex gap-2 justify-end">
+              <button
+                type="button"
+                onClick={() => setEditingAiName(false)}
+                className="text-xs font-mono text-muted-foreground hover:text-gold px-3 py-1.5 rounded border border-border"
+              >
+                CANCEL
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const name = aiNameDraft.trim() || "SENTRY";
+                  setAiDisplayName(name);
+                  localStorage.setItem("sentry_ai_name", name);
+                  setEditingAiName(false);
+                }}
+                className="text-xs font-mono text-black bg-gold hover:bg-gold-bright px-3 py-1.5 rounded font-bold"
+              >
+                SAVE
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* User display name edit modal */}
+      {editingUserName && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center"
+          style={{ background: "oklch(0 0 0 / 0.7)" }}
+        >
+          <div className="bg-card border border-gold/40 rounded-lg p-4 shadow-2xl w-72">
+            <p className="text-[10px] font-mono text-gold/60 tracking-widest mb-3">
+              RENAME PROFILE
+            </p>
+            <input
+              type="text"
+              value={userNameDraft}
+              onChange={(e) => setUserNameDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  const name = userNameDraft.trim() || currentUsername;
+                  setUserDisplayName(name);
+                  const u = getCurrentUser() || "";
+                  if (u) localStorage.setItem(`sentry_display_name_${u}`, name);
+                  setEditingUserName(false);
+                }
+                if (e.key === "Escape") setEditingUserName(false);
+              }}
+              className="w-full bg-input border border-gold/30 rounded px-3 py-2 text-gold font-mono text-sm focus:outline-none focus:border-gold mb-3"
+              placeholder={currentUsername}
+            />
+            <div className="flex gap-2 justify-end">
+              <button
+                type="button"
+                onClick={() => setEditingUserName(false)}
+                className="text-xs font-mono text-muted-foreground hover:text-gold px-3 py-1.5 rounded border border-border"
+              >
+                CANCEL
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const name = userNameDraft.trim() || currentUsername;
+                  setUserDisplayName(name);
+                  const u = getCurrentUser() || "";
+                  if (u) localStorage.setItem(`sentry_display_name_${u}`, name);
+                  setEditingUserName(false);
+                }}
+                className="text-xs font-mono text-black bg-gold hover:bg-gold-bright px-3 py-1.5 rounded font-bold"
+              >
+                SAVE
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Emoji picker */}
       {showEmoji && (
         <div
           className="absolute bottom-[88px] left-4 z-20 bg-card border border-gold/40 rounded-lg p-3 shadow-2xl"
           style={{ width: 300 }}
         >
-          {/* Custom emojis: canister + local fallback */}
-          <div className="mb-3">
-            <p className="text-[9px] font-mono text-gold/50 tracking-widest mb-1">
-              CUSTOM EMOJIS
-            </p>
-            {(canisterEmojis ?? []).length === 0 && localEmojis.length === 0 ? (
-              <p className="text-[10px] font-mono text-muted-foreground/50 py-1">
-                No custom emojis yet — add one below
+          {/* Scrollable emoji content */}
+          <div className="max-h-72 overflow-y-auto">
+            {/* Custom emojis: canister + local fallback */}
+            <div className="mb-3">
+              <p className="text-[9px] font-mono text-gold/50 tracking-widest mb-1">
+                CUSTOM EMOJIS
               </p>
-            ) : (
-              <div className="flex flex-wrap gap-1">
-                {(canisterEmojis ?? []).map((emojiEntry) => (
-                  <div
-                    key={emojiEntry.id.toString()}
-                    className="relative group"
-                  >
-                    <button
-                      type="button"
-                      className="text-xl hover:scale-125 transition-transform w-8 h-8 flex items-center justify-center rounded hover:bg-gold/10"
-                      onClick={() => {
-                        insertEmoji(emojiEntry.emoji);
-                        setShowEmoji(false);
-                      }}
+              {(canisterEmojis ?? []).length === 0 &&
+              localEmojis.length === 0 ? (
+                <p className="text-[10px] font-mono text-muted-foreground/50 py-1">
+                  No custom emojis yet — add one below
+                </p>
+              ) : (
+                <div className="flex flex-wrap gap-1">
+                  {(canisterEmojis ?? []).map((emojiEntry) => (
+                    <div
+                      key={emojiEntry.id.toString()}
+                      className="relative group"
                     >
-                      {emojiEntry.emoji}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => removeCustomEmoji(emojiEntry.id)}
-                      className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-destructive rounded-full text-destructive-foreground text-[8px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                      data-ocid="chat.delete_button"
-                    >
-                      <X className="w-2 h-2" />
-                    </button>
-                  </div>
-                ))}
-                {localEmojis.map((emojiEntry) => (
-                  <div key={emojiEntry.id} className="relative group">
-                    <button
-                      type="button"
-                      className="text-xl hover:scale-125 transition-transform w-8 h-8 flex items-center justify-center rounded hover:bg-gold/10"
-                      onClick={() => {
-                        insertEmoji(emojiEntry.emoji);
-                        setShowEmoji(false);
-                      }}
-                    >
-                      {emojiEntry.emoji}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => removeCustomEmoji(emojiEntry.id)}
-                      className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-destructive rounded-full text-destructive-foreground text-[8px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                      data-ocid="chat.delete_button"
-                    >
-                      <X className="w-2 h-2" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-          <div className="border-t border-gold/20 mb-2" />
-          <div className="flex flex-wrap gap-1 mb-3">
-            <p className="w-full text-[9px] font-mono text-gold/50 tracking-widest mb-1">
-              DEFAULT EMOJIS
-            </p>
-            {EMOJI_LIST.filter((e) => !deletedDefaultEmojis.has(e)).map(
-              (emoji) => (
-                <div key={emoji} className="relative group">
-                  <button
-                    type="button"
-                    className="text-xl hover:scale-125 transition-transform w-8 h-8 flex items-center justify-center rounded hover:bg-gold/10"
-                    onClick={() => {
-                      insertEmoji(emoji);
-                      setShowEmoji(false);
-                    }}
-                  >
-                    {emoji}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const next = new Set(deletedDefaultEmojis);
-                      next.add(emoji);
-                      setDeletedDefaultEmojis(next);
-                      try {
-                        localStorage.setItem(
-                          "sentry-deleted-default-emojis",
-                          JSON.stringify([...next]),
-                        );
-                      } catch {}
-                    }}
-                    className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-destructive rounded-full text-destructive-foreground text-[8px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                    data-ocid="chat.delete_button"
-                  >
-                    <X className="w-2 h-2" />
-                  </button>
+                      <button
+                        type="button"
+                        className="text-xl hover:scale-125 transition-transform w-8 h-8 flex items-center justify-center rounded hover:bg-gold/10"
+                        onClick={() => {
+                          insertEmoji(emojiEntry.emoji);
+                          setShowEmoji(false);
+                        }}
+                      >
+                        {emojiEntry.emoji}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => removeCustomEmoji(emojiEntry.id)}
+                        className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-destructive rounded-full text-destructive-foreground text-[8px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                        data-ocid="chat.delete_button"
+                      >
+                        <X className="w-2 h-2" />
+                      </button>
+                    </div>
+                  ))}
+                  {localEmojis.map((emojiEntry) => (
+                    <div key={emojiEntry.id} className="relative group">
+                      <button
+                        type="button"
+                        className="text-xl hover:scale-125 transition-transform w-8 h-8 flex items-center justify-center rounded hover:bg-gold/10"
+                        onClick={() => {
+                          insertEmoji(emojiEntry.emoji);
+                          setShowEmoji(false);
+                        }}
+                      >
+                        {emojiEntry.emoji}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => removeCustomEmoji(emojiEntry.id)}
+                        className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-destructive rounded-full text-destructive-foreground text-[8px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                        data-ocid="chat.delete_button"
+                      >
+                        <X className="w-2 h-2" />
+                      </button>
+                    </div>
+                  ))}
                 </div>
-              ),
-            )}
-            {deletedDefaultEmojis.size > 0 && (
-              <button
-                type="button"
-                onClick={() => {
-                  setDeletedDefaultEmojis(new Set());
-                  localStorage.removeItem("sentry-deleted-default-emojis");
-                }}
-                className="text-[9px] font-mono text-gold/40 hover:text-gold transition-colors px-1"
-              >
-                restore
-              </button>
-            )}
+              )}
+            </div>
+            <div className="border-t border-gold/20 mb-2" />
+            <div className="flex flex-wrap gap-1 mb-3">
+              <p className="w-full text-[9px] font-mono text-gold/50 tracking-widest mb-1">
+                DEFAULT EMOJIS
+              </p>
+              {EMOJI_LIST.filter((e) => !deletedDefaultEmojis.has(e)).map(
+                (emoji) => (
+                  <div key={emoji} className="relative group">
+                    <button
+                      type="button"
+                      className="text-xl hover:scale-125 transition-transform w-8 h-8 flex items-center justify-center rounded hover:bg-gold/10"
+                      onClick={() => {
+                        insertEmoji(emoji);
+                        setShowEmoji(false);
+                      }}
+                    >
+                      {emoji}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next = new Set(deletedDefaultEmojis);
+                        next.add(emoji);
+                        setDeletedDefaultEmojis(next);
+                        try {
+                          localStorage.setItem(
+                            "sentry-deleted-default-emojis",
+                            JSON.stringify([...next]),
+                          );
+                        } catch {}
+                      }}
+                      className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-destructive rounded-full text-destructive-foreground text-[8px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                      data-ocid="chat.delete_button"
+                    >
+                      <X className="w-2 h-2" />
+                    </button>
+                  </div>
+                ),
+              )}
+              {deletedDefaultEmojis.size > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDeletedDefaultEmojis(new Set());
+                    localStorage.removeItem("sentry-deleted-default-emojis");
+                  }}
+                  className="text-[9px] font-mono text-gold/40 hover:text-gold transition-colors px-1"
+                >
+                  restore
+                </button>
+              )}
+            </div>
           </div>
+          {/* end scrollable */}
           <div className="border-t border-gold/20 pt-2 flex gap-1">
             <input
               type="text"

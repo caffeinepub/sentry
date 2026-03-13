@@ -257,3 +257,93 @@
   pointer-events: none;
   z-index: 1;
 }
+
+/* ── Global Button & Input Theme Overrides ────────────────────────────────── */
+/* All buttons stay black at all interaction states; text is gold */
+button,
+[role="button"],
+input[type="button"],
+input[type="submit"],
+input[type="reset"] {
+  background-color: black !important;
+  color: oklch(var(--gold)) !important;
+}
+
+button:hover,
+[role="button"]:hover,
+button:focus-visible,
+[role="button"]:focus-visible,
+button:active,
+[role="button"]:active {
+  background-color: #000000 !important;
+  color: oklch(var(--gold)) !important;
+  box-shadow: 0 0 0 1px oklch(var(--gold) / 0.4) !important;
+}
+
+/* Keep destructive/delete buttons readable but still on black */
+button.text-destructive,
+button[class*="destructive"] {
+  color: oklch(0.65 0.22 25) !important;
+}
+
+/* All text inputs, textareas, selects are black with gold text */
+input:not([type="file"]):not([type="range"]):not([type="checkbox"]):not(
+    [type="radio"]
+  ):not([type="color"]),
+textarea,
+select {
+  background-color: black !important;
+  color: oklch(var(--gold)) !important;
+  border-color: oklch(var(--gold) / 0.4) !important;
+}
+
+input:not([type="file"]):not([type="range"]):not([type="checkbox"]):not(
+    [type="radio"]
+  ):not([type="color"]):focus,
+textarea:focus,
+select:focus {
+  border-color: oklch(var(--gold) / 0.8) !important;
+  outline: none !important;
+  box-shadow: 0 0 0 2px oklch(var(--gold) / 0.15) !important;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: oklch(var(--gold) / 0.45) !important;
+}
+
+/* ── Force all text to be gold globally ──────────────────────────────────── */
+*,
+*::before,
+*::after {
+  color: oklch(var(--gold));
+}
+/* Allow destructive to stay red */
+.text-destructive,
+[class*="destructive"] {
+  color: oklch(0.65 0.22 25) !important;
+}
+
+/* ── Nuclear button override — beat all Tailwind utilities ──────────────── */
+/* Targets bg-gold and similar utility classes on buttons */
+button.bg-gold,
+button.bg-primary,
+button.bg-secondary,
+button.bg-accent,
+button.bg-muted,
+button[class*="bg-"],
+[role="button"][class*="bg-"] {
+  background-color: #000000 !important;
+  color: oklch(var(--gold)) !important;
+}
+/* Also catch variant="default" shadcn buttons which use inline style-like classes */
+.inline-flex.items-center.bg-primary,
+.inline-flex.items-center.bg-secondary,
+.inline-flex.items-center.bg-accent {
+  background-color: #000000 !important;
+  color: oklch(var(--gold)) !important;
+}
+/* Allow transparent/inherit and muted variants to use opacity */
+.text-muted-foreground {
+  color: oklch(var(--gold) / 0.55) !important;
+}
