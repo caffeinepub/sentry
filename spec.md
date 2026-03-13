@@ -1,48 +1,32 @@
 # Sentry
 
 ## Current State
-Sentry is a full-featured AI chat application with black and gold theme, 3D brain visualization, memory explorer, teaching/reasoning commands, persistent chat history, emoji/GIF support, user management, and real-time canister sync. The CSS import in main.tsx currently uses `../index.css` (wrong) instead of `./index.css` (correct gold theme) — this must be fixed. Themes are hardcoded; no font selection or per-model theming exists. The menu has no Clone AI option.
+Sentry is a full-featured AI chat app with black/gold theme, memory system, emoji/GIF picker, clone AI dialog, and user management. The emoji picker has no scroll limit. CloneAIDialog only shows a create form with no profile list/select/delete. GIF display on upload is broken (blank). Members image upload is gated to Unity/Syndelious only. Live content fetch hangs without user feedback. Chat history and auto-save are implemented.
 
 ## Requested Changes (Diff)
 
 ### Add
-- **Theme Editor**: A settings UI that lets the user set two RGB color values — one for "gold" (primary accent) and one for "black" (background). Themes can be saved with a name and optionally linked to a specific AI model name. When a linked model is active in chat, its theme auto-applies. Store themes in localStorage as `sentry_themes`. Apply by injecting CSS variables (`--theme-gold-r/g/b`, `--theme-bg-r/g/b`) on `:root` and convert to `rgb()` usage via a thin inline style tag on the app wrapper.
-- **Font Selection**: 13 font presets loaded from Google Fonts at runtime. User selects by category name. Font applies to the entire UI body. Stored in localStorage as `sentry_selected_font`. Categories and Google Font families:
-  - Fancy: Fleur De Leah
-  - Combat: Bonheur Royale
-  - Animal: Puppies Play
-  - Anime: Atma
-  - Horror: Butcherman
-  - Fantasy: Mystery Quest
-  - Candy: Flavors
-  - Spiritual: Vibes
-  - Book: Viaoda Libre
-  - Old Time: Quintessential
-  - Library: Almendra SC
-  - Royalty: Kings
-  - Future: Megrim
-  - (Default): system font stack
-- **Clone AI Button** in the header menu (accessible via a kebab/menu button or directly as a button). Clones: all memories, rules, categories, personality into a new AI profile named by the user. Does NOT clone: chat history, logo/avatar, AI name, chat theme, font. The cloned AI appears as a selectable profile. Show a dialog asking for the new AI's name before cloning.
-- **GIF Display Fix**: Ensure uploaded GIFs render properly — store full data URL in IndexedDB, load from IndexedDB before rendering, use `<img>` tag with the blob/data URL directly, avoid any truncation.
+- Scrollable emoji picker container (max-height with overflow-y-auto wrapping all emoji sections)
+- Profile list in CloneAIDialog: show existing AI profiles with ability to select (activate) and delete each one; display which profile is currently active
+- Member image upload accessible to all users (each member can upload their own profile image), not just privileged users
+- `interpretMediaAttachment` should actually read text file content (for .txt/.json/.csv files uploaded) and display inline; for image/GIF, show inline immediately without blank state
+- Live content fetch: show a loading indicator "Fetching..." in the chat while fetching, with a timeout message if it takes too long or fails (never hang silently)
 
 ### Modify
-- **main.tsx**: Fix CSS import from `../index.css` to `./index.css` permanently.
-- **Header**: Add Clone AI icon button and a Theme/Font quick-access button alongside existing buttons.
-- **Settings/ImportExport Panel**: Add Theme Editor and Font Picker tabs within the existing settings modal.
-- **App.tsx**: Inject theme CSS variables as inline style on root div, read from localStorage on mount, update when theme changes via context.
-- **index.css**: Replace all hardcoded `oklch(var(--gold)...)` references with a fallback that respects the new theme variables when set. Keep oklch fallbacks for when no custom theme is active.
+- Emoji picker: wrap the entire picker div contents in a scrollable area with `max-h-80 overflow-y-auto`
+- GIF rendering in AttachmentDisplay: for freshly uploaded GIFs (data: URLs), the image should render immediately; remove the `[GIF loading…]` blank state for data URLs that are already resolved; only show loading for `idb:` references still being resolved
+- CloneAIDialog: restructure to show (1) list of existing profiles with select/activate and delete buttons, (2) create new clone form below
+- UserManagement: allow any logged-in user to upload their own member image (not just Unity/Syndelious)
+- handleLinkAttach in ChatPanel: show "Fetching link content..." sentry message immediately, then update it with real content or error within 10 seconds; never hang silently
+- handleFileAttach: for text/json/csv files, read the file content and include it in the sentry response
 
 ### Remove
-- Nothing removed.
+- Nothing removed
 
 ## Implementation Plan
-1. Fix `main.tsx` CSS import.
-2. Create `src/frontend/src/utils/themeManager.ts` — types, load/save, apply (injects `<style>` on `<head>` with CSS var overrides), list themes, delete theme, auto-apply by model name.
-3. Create `src/frontend/src/utils/fontManager.ts` — font catalog, load Google Font dynamically via `<link>`, apply to body, persist selection.
-4. Create `src/frontend/src/components/ThemeEditor.tsx` — form with two RGB pickers (gold color, background color), theme name input, optional model link input, save/delete buttons, list of saved themes.
-5. Create `src/frontend/src/components/FontPicker.tsx` — grid of 13 + default preset buttons, shows category name, preview text in that font.
-6. Create `src/frontend/src/components/CloneAIDialog.tsx` — dialog with name input, clone button, confirmation.
-7. Update `Header.tsx` — add Clone AI button (Copy icon) and Theme button (Palette icon) with appropriate handlers passed from App.
-8. Update `App.tsx` — manage theme/font state, pass handlers to Header, apply theme via style on root, open ThemeEditor and CloneAI dialogs.
-9. Update `ImportExportPanel.tsx` — add Theme and Font tabs using the new components.
-10. Fix GIF display in `ChatPanel.tsx` — ensure attachment src is loaded from IndexedDB before rendering, use blob URL or direct data URL in `<img src>`.
+1. ChatPanel.tsx: Add `max-h-80 overflow-y-auto` wrapper around emoji picker inner content sections
+2. AttachmentDisplay: Fix GIF blank by only showing `[GIF loading…]` when URL starts with `idb:` AND resolvedUrl is empty; for data: URLs, resolvedUrl is already set in initial state, no loading needed
+3. CloneAIDialog.tsx: Add profile list with activate/delete; show active profile name
+4. UserManagement.tsx: Remove `canManageImages` gate from own-user image upload (each user can upload their own image)
+5. ChatPanel.tsx handleLinkAttach: Add immediate "Fetching..." message + timeout/error fallback
+6. ChatPanel.tsx handleFileAttach: For text files, read content via FileReader as text and include in sentry response

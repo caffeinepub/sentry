@@ -210,11 +210,7 @@ function AttachmentDisplay({ attachment }: { attachment: Attachment }) {
   }, [attachment.url]);
 
   if (attachment.type === "gif") {
-    const displayUrl =
-      resolvedUrl ||
-      (attachment.url?.startsWith("data:") ? attachment.url : "") ||
-      "";
-    if (!displayUrl)
+    if (!resolvedUrl)
       return (
         <span className="text-xs text-muted-foreground font-mono italic">
           [GIF loading…]
@@ -222,7 +218,7 @@ function AttachmentDisplay({ attachment }: { attachment: Attachment }) {
       );
     return (
       <img
-        src={displayUrl}
+        src={resolvedUrl}
         alt={attachment.name || "GIF"}
         loading="eager"
         decoding="async"
@@ -996,28 +992,11 @@ export default function ChatPanel() {
     });
     persistMessage(userMsg);
 
-    // Add a "fetching" message immediately so it doesn't hang silently
-    const fetchingMsg = addMessage({
-      role: "sentry",
-      content: "Fetching content from that link…",
-    });
-    persistMessage(fetchingMsg);
-
-    // Try to fetch live content with a 10-second timeout
-    let liveContent: string | null = null;
-    try {
-      liveContent = await Promise.race([
-        fetchLinkContent(url),
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), 10000)),
-      ]);
-    } catch {
-      liveContent = null;
-    }
-
+    // Try to fetch live content
+    const liveContent = await fetchLinkContent(url);
     const sentryResponseContent = liveContent
-      ? `Here's what I found from that link:\n\n${liveContent}`
-      : interpretLink(url) ||
-        "I couldn't retrieve content from that link (timeout or blocked).";
+      ? `I fetched the content from that link. Here's what I found:\n\n${liveContent}\n\nI've stored this in my knowledge graph for our conversation.`
+      : interpretLink(url);
 
     const sentryMsg = addMessage({
       role: "sentry",
@@ -1355,124 +1334,119 @@ export default function ChatPanel() {
           className="absolute bottom-[88px] left-4 z-20 bg-card border border-gold/40 rounded-lg p-3 shadow-2xl"
           style={{ width: 300 }}
         >
-          {/* Scrollable emoji content */}
-          <div className="max-h-72 overflow-y-auto">
-            {/* Custom emojis: canister + local fallback */}
-            <div className="mb-3">
-              <p className="text-[9px] font-mono text-gold/50 tracking-widest mb-1">
-                CUSTOM EMOJIS
+          {/* Custom emojis: canister + local fallback */}
+          <div className="mb-3">
+            <p className="text-[9px] font-mono text-gold/50 tracking-widest mb-1">
+              CUSTOM EMOJIS
+            </p>
+            {(canisterEmojis ?? []).length === 0 && localEmojis.length === 0 ? (
+              <p className="text-[10px] font-mono text-muted-foreground/50 py-1">
+                No custom emojis yet — add one below
               </p>
-              {(canisterEmojis ?? []).length === 0 &&
-              localEmojis.length === 0 ? (
-                <p className="text-[10px] font-mono text-muted-foreground/50 py-1">
-                  No custom emojis yet — add one below
-                </p>
-              ) : (
-                <div className="flex flex-wrap gap-1">
-                  {(canisterEmojis ?? []).map((emojiEntry) => (
-                    <div
-                      key={emojiEntry.id.toString()}
-                      className="relative group"
-                    >
-                      <button
-                        type="button"
-                        className="text-xl hover:scale-125 transition-transform w-8 h-8 flex items-center justify-center rounded hover:bg-gold/10"
-                        onClick={() => {
-                          insertEmoji(emojiEntry.emoji);
-                          setShowEmoji(false);
-                        }}
-                      >
-                        {emojiEntry.emoji}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => removeCustomEmoji(emojiEntry.id)}
-                        className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-destructive rounded-full text-destructive-foreground text-[8px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                        data-ocid="chat.delete_button"
-                      >
-                        <X className="w-2 h-2" />
-                      </button>
-                    </div>
-                  ))}
-                  {localEmojis.map((emojiEntry) => (
-                    <div key={emojiEntry.id} className="relative group">
-                      <button
-                        type="button"
-                        className="text-xl hover:scale-125 transition-transform w-8 h-8 flex items-center justify-center rounded hover:bg-gold/10"
-                        onClick={() => {
-                          insertEmoji(emojiEntry.emoji);
-                          setShowEmoji(false);
-                        }}
-                      >
-                        {emojiEntry.emoji}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => removeCustomEmoji(emojiEntry.id)}
-                        className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-destructive rounded-full text-destructive-foreground text-[8px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                        data-ocid="chat.delete_button"
-                      >
-                        <X className="w-2 h-2" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-            <div className="border-t border-gold/20 mb-2" />
-            <div className="flex flex-wrap gap-1 mb-3">
-              <p className="w-full text-[9px] font-mono text-gold/50 tracking-widest mb-1">
-                DEFAULT EMOJIS
-              </p>
-              {EMOJI_LIST.filter((e) => !deletedDefaultEmojis.has(e)).map(
-                (emoji) => (
-                  <div key={emoji} className="relative group">
+            ) : (
+              <div className="flex flex-wrap gap-1">
+                {(canisterEmojis ?? []).map((emojiEntry) => (
+                  <div
+                    key={emojiEntry.id.toString()}
+                    className="relative group"
+                  >
                     <button
                       type="button"
                       className="text-xl hover:scale-125 transition-transform w-8 h-8 flex items-center justify-center rounded hover:bg-gold/10"
                       onClick={() => {
-                        insertEmoji(emoji);
+                        insertEmoji(emojiEntry.emoji);
                         setShowEmoji(false);
                       }}
                     >
-                      {emoji}
+                      {emojiEntry.emoji}
                     </button>
                     <button
                       type="button"
-                      onClick={() => {
-                        const next = new Set(deletedDefaultEmojis);
-                        next.add(emoji);
-                        setDeletedDefaultEmojis(next);
-                        try {
-                          localStorage.setItem(
-                            "sentry-deleted-default-emojis",
-                            JSON.stringify([...next]),
-                          );
-                        } catch {}
-                      }}
+                      onClick={() => removeCustomEmoji(emojiEntry.id)}
                       className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-destructive rounded-full text-destructive-foreground text-[8px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
                       data-ocid="chat.delete_button"
                     >
                       <X className="w-2 h-2" />
                     </button>
                   </div>
-                ),
-              )}
-              {deletedDefaultEmojis.size > 0 && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setDeletedDefaultEmojis(new Set());
-                    localStorage.removeItem("sentry-deleted-default-emojis");
-                  }}
-                  className="text-[9px] font-mono text-gold/40 hover:text-gold transition-colors px-1"
-                >
-                  restore
-                </button>
-              )}
-            </div>
+                ))}
+                {localEmojis.map((emojiEntry) => (
+                  <div key={emojiEntry.id} className="relative group">
+                    <button
+                      type="button"
+                      className="text-xl hover:scale-125 transition-transform w-8 h-8 flex items-center justify-center rounded hover:bg-gold/10"
+                      onClick={() => {
+                        insertEmoji(emojiEntry.emoji);
+                        setShowEmoji(false);
+                      }}
+                    >
+                      {emojiEntry.emoji}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => removeCustomEmoji(emojiEntry.id)}
+                      className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-destructive rounded-full text-destructive-foreground text-[8px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                      data-ocid="chat.delete_button"
+                    >
+                      <X className="w-2 h-2" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
-          {/* end scrollable */}
+          <div className="border-t border-gold/20 mb-2" />
+          <div className="flex flex-wrap gap-1 mb-3">
+            <p className="w-full text-[9px] font-mono text-gold/50 tracking-widest mb-1">
+              DEFAULT EMOJIS
+            </p>
+            {EMOJI_LIST.filter((e) => !deletedDefaultEmojis.has(e)).map(
+              (emoji) => (
+                <div key={emoji} className="relative group">
+                  <button
+                    type="button"
+                    className="text-xl hover:scale-125 transition-transform w-8 h-8 flex items-center justify-center rounded hover:bg-gold/10"
+                    onClick={() => {
+                      insertEmoji(emoji);
+                      setShowEmoji(false);
+                    }}
+                  >
+                    {emoji}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = new Set(deletedDefaultEmojis);
+                      next.add(emoji);
+                      setDeletedDefaultEmojis(next);
+                      try {
+                        localStorage.setItem(
+                          "sentry-deleted-default-emojis",
+                          JSON.stringify([...next]),
+                        );
+                      } catch {}
+                    }}
+                    className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-destructive rounded-full text-destructive-foreground text-[8px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                    data-ocid="chat.delete_button"
+                  >
+                    <X className="w-2 h-2" />
+                  </button>
+                </div>
+              ),
+            )}
+            {deletedDefaultEmojis.size > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  setDeletedDefaultEmojis(new Set());
+                  localStorage.removeItem("sentry-deleted-default-emojis");
+                }}
+                className="text-[9px] font-mono text-gold/40 hover:text-gold transition-colors px-1"
+              >
+                restore
+              </button>
+            )}
+          </div>
           <div className="border-t border-gold/20 pt-2 flex gap-1">
             <input
               type="text"

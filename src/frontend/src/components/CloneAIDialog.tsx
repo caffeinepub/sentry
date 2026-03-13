@@ -7,7 +7,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Copy, X } from "lucide-react";
+import { Check, Copy, Trash2, X } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { getCurrentUser } from "../utils/localAuth";
@@ -35,6 +35,18 @@ function saveProfiles(profiles: AIProfile[]): void {
   localStorage.setItem("sentry_ai_profiles", JSON.stringify(profiles));
 }
 
+function getActiveProfileId(): string | null {
+  return localStorage.getItem("sentry_active_profile");
+}
+
+function setActiveProfileId(id: string | null): void {
+  if (id) {
+    localStorage.setItem("sentry_active_profile", id);
+  } else {
+    localStorage.removeItem("sentry_active_profile");
+  }
+}
+
 interface CloneAIDialogProps {
   open: boolean;
   onClose: () => void;
@@ -43,6 +55,32 @@ interface CloneAIDialogProps {
 export default function CloneAIDialog({ open, onClose }: CloneAIDialogProps) {
   const [newName, setNewName] = useState("");
   const [cloning, setCloning] = useState(false);
+  const [profiles, setProfiles] = useState<AIProfile[]>(() => loadProfiles());
+  const [activeProfileId, setActiveProfileIdState] = useState<string | null>(
+    () => getActiveProfileId(),
+  );
+
+  const refreshProfiles = () => {
+    setProfiles(loadProfiles());
+    setActiveProfileIdState(getActiveProfileId());
+  };
+
+  const handleActivate = (profileId: string) => {
+    setActiveProfileId(profileId);
+    setActiveProfileIdState(profileId);
+    toast.success("AI profile activated");
+  };
+
+  const handleDelete = (profileId: string) => {
+    const updated = profiles.filter((p) => p.id !== profileId);
+    saveProfiles(updated);
+    if (activeProfileId === profileId) {
+      setActiveProfileId(null);
+      setActiveProfileIdState(null);
+    }
+    setProfiles(updated);
+    toast.success("Profile deleted");
+  };
 
   const handleClone = () => {
     if (!newName.trim()) {
@@ -84,13 +122,13 @@ export default function CloneAIDialog({ open, onClose }: CloneAIDialogProps) {
         // NOT copied: chat history, avatar, theme, font
       };
 
-      const profiles = loadProfiles();
-      profiles.push(profile);
-      saveProfiles(profiles);
+      const existing = loadProfiles();
+      existing.push(profile);
+      saveProfiles(existing);
 
       toast.success(`AI profile "${newName.trim()}" created.`);
       setNewName("");
-      onClose();
+      refreshProfiles();
     } catch (err) {
       toast.error("Failed to clone AI profile.");
       console.error(err);
@@ -102,7 +140,7 @@ export default function CloneAIDialog({ open, onClose }: CloneAIDialogProps) {
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
       <DialogContent
-        className="bg-card border-gold/30 max-w-sm"
+        className="bg-card border-gold/30 max-w-md"
         data-ocid="clone_ai.dialog"
       >
         <DialogHeader className="pb-2">
@@ -123,10 +161,95 @@ export default function CloneAIDialog({ open, onClose }: CloneAIDialogProps) {
           </div>
         </DialogHeader>
 
-        <div className="space-y-4">
+        {/* Existing profiles list */}
+        <div className="space-y-2 mb-4">
+          <p className="text-[10px] font-mono text-gold/60 tracking-widest">
+            AI PROFILES
+          </p>
+          {profiles.length === 0 ? (
+            <p
+              className="text-[11px] font-mono text-muted-foreground/50 py-2 text-center"
+              data-ocid="clone_ai.empty_state"
+            >
+              No cloned profiles yet
+            </p>
+          ) : (
+            <div className="space-y-1.5 max-h-52 overflow-y-auto">
+              {profiles.map((profile, idx) => {
+                const isActive = profile.id === activeProfileId;
+                return (
+                  <div
+                    key={profile.id}
+                    className={`flex items-center gap-2 px-3 py-2 rounded border ${
+                      isActive
+                        ? "border-gold bg-gold/5"
+                        : "border-gold/20 bg-secondary/20"
+                    }`}
+                    data-ocid={
+                      idx === 0
+                        ? "clone_ai.item.1"
+                        : idx === 1
+                          ? "clone_ai.item.2"
+                          : idx === 2
+                            ? "clone_ai.item.3"
+                            : undefined
+                    }
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        {isActive && (
+                          <Check className="w-3 h-3 text-gold shrink-0" />
+                        )}
+                        <span className="text-xs font-mono text-foreground truncate">
+                          {profile.name}
+                        </span>
+                      </div>
+                      <p className="text-[9px] font-mono text-muted-foreground/50 mt-0.5">
+                        {new Date(profile.createdAt).toLocaleDateString()}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      {!isActive && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 px-2 text-[9px] font-mono text-gold hover:bg-gold/10"
+                          onClick={() => handleActivate(profile.id)}
+                          data-ocid="clone_ai.primary_button"
+                        >
+                          ACTIVATE
+                        </Button>
+                      )}
+                      {isActive && (
+                        <span className="text-[9px] font-mono text-gold/70 px-1">
+                          ACTIVE
+                        </span>
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="w-6 h-6 text-muted-foreground hover:text-destructive"
+                        onClick={() => handleDelete(profile.id)}
+                        data-ocid="clone_ai.delete_button"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Create new clone */}
+        <div className="border-t border-border pt-4 space-y-3">
+          <p className="text-[10px] font-mono text-gold/60 tracking-widest">
+            CREATE NEW CLONE
+          </p>
           <p className="text-xs text-muted-foreground font-mono leading-relaxed">
-            Creates a new AI profile with the same memories, rules, and
-            categories — but not the chat history, name, theme, or avatar.
+            Copies memories, rules, and categories — not chat history, name,
+            theme, or avatar.
           </p>
 
           <div className="space-y-2">
