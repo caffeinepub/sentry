@@ -64,6 +64,7 @@ import {
   getLocalGifs,
   removeLocalEmoji,
   removeLocalGif,
+  resolveAttachmentUrls,
   saveChatMessages,
 } from "../utils/localDB";
 import PersonalityBars from "./PersonalityBars";
@@ -286,6 +287,21 @@ export default function ChatPanel() {
     const u = getCurrentUser() || "";
     return getChatMessages(u);
   });
+
+  // Resolve idb: attachment references back to real data URLs on initial load
+  useEffect(() => {
+    setMessages((prev) => {
+      const hasIdb = prev.some((m) =>
+        m.attachments?.some((a) => a.url?.startsWith("idb:")),
+      );
+      if (!hasIdb) return prev;
+      resolveAttachmentUrls(prev).then((resolved) => {
+        setMessages(resolved);
+      });
+      return prev; // keep current state until async resolves
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [input, setInput] = useState("");
   const [isThinking, setIsThinking] = useState(false);
   const [showTimeline, setShowTimeline] = useState(false);
@@ -370,17 +386,16 @@ export default function ChatPanel() {
         avatarUrl: "",
       }));
       setMessages((prev) => {
-        // Keep local messages (preserves data URLs for GIFs/images)
-        // Only add truly new messages from canister
-        const existingKeys = new Set(prev.map((m) => `${m.role}:${m.content}`));
-        const newOnes = converted.filter(
-          (m) => !existingKeys.has(`${m.role}:${m.content}`),
-        );
+        // Keep local messages (preserves data URLs for GIFs/images).
+        // Use canister message ID as dedup key — NOT role:content, which collides
+        // for GIF messages that all have content="".
+        const existingIds = new Set(prev.map((m) => m.id));
+        const newOnes = converted.filter((m) => !existingIds.has(m.id));
         return [...prev, ...newOnes];
       });
-      // Also save to localStorage for offline/persistence
-      const u = getCurrentUser() || "";
-      if (u) saveChatMessages(u, converted);
+      // NOTE: do NOT save canister messages to localStorage here — canister
+      // messages may have empty/missing attachment data for large GIFs.
+      // The messages useEffect below saves the merged state correctly.
     }
     // If canister returns empty, keep localStorage messages (already initialized from there)
   }, [canisterMessages]);

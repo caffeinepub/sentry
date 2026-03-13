@@ -163,6 +163,8 @@ export function getUserProfile(username: string): {
 }
 
 // ── CHAT MESSAGES (per-user, persistent) ──────────────────────────────────────
+// Data URLs for images/GIFs are stored in IndexedDB (attachmentStore) to avoid
+// localStorage quota limits. The message JSON stores an "idb:<key>" reference.
 
 export function getChatMessages(username: string): ChatMessage[] {
   try {
@@ -178,16 +180,44 @@ export function getChatMessages(username: string): ChatMessage[] {
   }
 }
 
+/** Resolve idb: reference URLs back to data URLs (async, call on load). */
+export async function resolveAttachmentUrls(
+  messages: ChatMessage[],
+): Promise<ChatMessage[]> {
+  const { loadAttachment } = await import("./attachmentStore");
+  return Promise.all(
+    messages.map(async (msg) => {
+      if (!msg.attachments?.length) return msg;
+      const attachments = await Promise.all(
+        msg.attachments.map(async (att) => {
+          if (att.url?.startsWith("idb:")) {
+            const data = await loadAttachment(att.url.slice(4));
+            return data ? { ...att, url: data } : att;
+          }
+          return att;
+        }),
+      );
+      return { ...msg, attachments };
+    }),
+  );
+}
+
 export function saveChatMessages(
   username: string,
   messages: ChatMessage[],
 ): void {
-  // Strip large data URLs from attachments before saving to avoid quota errors
-  const stripped = messages.map((msg) => ({
+  // Replace data URLs with idb: refs in the stored JSON (the real data lives in IndexedDB).
+  // This is fire-and-forget — storeAttachment is async but we don't need to await it here.
+  const refMessages = messages.map((msg) => ({
     ...msg,
     attachments: (msg.attachments || []).map((att) => {
-      if (att.url?.startsWith("data:") && att.url.length > 200000) {
-        return { ...att, url: att.url.slice(0, 200000), _truncated: true };
+      if (att.url?.startsWith("data:")) {
+        const key = `att_${msg.id}_${att.name || "file"}`;
+        // Persist to IndexedDB asynchronously
+        import("./attachmentStore").then(({ storeAttachment }) => {
+          storeAttachment(key, att.url);
+        });
+        return { ...att, url: `idb:${key}` };
       }
       return att;
     }),
@@ -195,7 +225,7 @@ export function saveChatMessages(
   try {
     localStorage.setItem(
       `sentry_chat_${username}`,
-      JSON.stringify(stripped, (_k, v) =>
+      JSON.stringify(refMessages, (_k, v) =>
         typeof v === "bigint" ? `__bigint__${v}` : v,
       ),
     );
@@ -217,6 +247,10 @@ export function saveChatMessages(
 
 export function clearChatMessages(username: string): void {
   localStorage.removeItem(`sentry_chat_${username}`);
+  // Also clear attachments from IndexedDB
+  import("./attachmentStore").then(({ clearAllAttachments }) => {
+    clearAllAttachments();
+  });
 }
 
 // ── LOCAL GIFS (fallback when canister unavailable) ───────────────────────────
