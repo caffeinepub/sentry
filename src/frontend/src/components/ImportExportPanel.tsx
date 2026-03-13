@@ -6,8 +6,9 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Separator } from "@/components/ui/separator";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Download, Upload, X } from "lucide-react";
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   useExportGlobalData,
@@ -15,6 +16,9 @@ import {
   useImportGlobalData,
   useImportUserData,
 } from "../hooks/useQueries";
+import { getSavedFont } from "../utils/fontManager";
+import FontPicker from "./FontPicker";
+import ThemeEditor from "./ThemeEditor";
 
 function downloadJson(data: string, filename: string) {
   const blob = new Blob([data], { type: "application/json" });
@@ -41,6 +45,7 @@ export default function ImportExportPanel({
   const exportGlobal = useExportGlobalData();
   const importUser = useImportUserData();
   const importGlobal = useImportGlobalData();
+  const [currentFont, setCurrentFont] = useState(() => getSavedFont());
 
   const handleExportUser = async () => {
     try {
@@ -99,13 +104,13 @@ export default function ImportExportPanel({
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
       <DialogContent
-        className="bg-card border-gold/30 max-w-md"
+        className="bg-card border-gold/30 max-w-md max-h-[85vh] overflow-y-auto"
         data-ocid="import_export.panel"
       >
         <DialogHeader className="pb-2">
           <div className="flex items-center justify-between">
             <DialogTitle className="font-display text-gold tracking-[0.2em]">
-              DATA MANAGEMENT
+              SETTINGS
             </DialogTitle>
             <Button
               variant="ghost"
@@ -118,91 +123,128 @@ export default function ImportExportPanel({
           </div>
         </DialogHeader>
 
-        <div className="space-y-5">
-          {/* User Data */}
-          <div className="border border-border rounded-md p-4 space-y-3">
-            <div>
-              <p className="text-sm font-mono text-gold tracking-widest">
-                USER DATA
-              </p>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Personal memories, history, personality & opinions
-              </p>
-            </div>
-            <div className="flex gap-2">
-              <Button
-                variant="outline"
-                className="flex-1 bg-gold border-gold text-black font-bold hover:bg-gold-bright font-mono text-xs"
-                onClick={handleExportUser}
-                disabled={exportUser.isPending}
-                data-ocid="user_data.export_button"
-              >
-                <Download className="w-3 h-3 mr-1" />
-                {exportUser.isPending ? "EXPORTING..." : "EXPORT"}
-              </Button>
-              <Button
-                variant="outline"
-                className="flex-1 border-gold/40 text-gold hover:bg-gold/10 font-mono text-xs"
-                onClick={() => userFileRef.current?.click()}
-                disabled={importUser.isPending}
-                data-ocid="user_data.upload_button"
-              >
-                <Upload className="w-3 h-3 mr-1" />
-                {importUser.isPending ? "IMPORTING..." : "IMPORT"}
-              </Button>
-              <input
-                ref={userFileRef}
-                type="file"
-                accept=".json"
-                className="hidden"
-                onChange={handleImportUser}
-              />
-            </div>
-          </div>
+        <Tabs defaultValue="data" className="w-full">
+          <TabsList className="w-full bg-black/50 border border-gold/20 mb-4">
+            <TabsTrigger
+              value="data"
+              className="flex-1 text-xs font-mono data-[state=active]:bg-gold data-[state=active]:text-black"
+              data-ocid="settings.data.tab"
+            >
+              DATA
+            </TabsTrigger>
+            <TabsTrigger
+              value="theme"
+              className="flex-1 text-xs font-mono data-[state=active]:bg-gold data-[state=active]:text-black"
+              data-ocid="settings.theme.tab"
+            >
+              THEME
+            </TabsTrigger>
+            <TabsTrigger
+              value="font"
+              className="flex-1 text-xs font-mono data-[state=active]:bg-gold data-[state=active]:text-black"
+              data-ocid="settings.font.tab"
+            >
+              FONT
+            </TabsTrigger>
+          </TabsList>
 
-          <Separator className="bg-border" />
+          <TabsContent value="data" className="space-y-5 mt-0">
+            {/* User Data */}
+            <div className="border border-border rounded-md p-4 space-y-3">
+              <div>
+                <p className="text-sm font-mono text-gold tracking-widest">
+                  USER DATA
+                </p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Personal memories, history, personality & opinions
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  className="flex-1 bg-gold border-gold text-black font-bold hover:bg-gold-bright font-mono text-xs"
+                  onClick={handleExportUser}
+                  disabled={exportUser.isPending}
+                  data-ocid="user_data.export_button"
+                >
+                  <Download className="w-3 h-3 mr-1" />
+                  {exportUser.isPending ? "EXPORTING..." : "EXPORT"}
+                </Button>
+                <Button
+                  variant="outline"
+                  className="flex-1 border-gold/40 text-gold hover:bg-gold/10 font-mono text-xs"
+                  onClick={() => userFileRef.current?.click()}
+                  disabled={importUser.isPending}
+                  data-ocid="user_data.upload_button"
+                >
+                  <Upload className="w-3 h-3 mr-1" />
+                  {importUser.isPending ? "IMPORTING..." : "IMPORT"}
+                </Button>
+                <input
+                  ref={userFileRef}
+                  type="file"
+                  accept=".json"
+                  className="hidden"
+                  onChange={handleImportUser}
+                />
+              </div>
+            </div>
 
-          {/* Global Data */}
-          <div className="border border-border rounded-md p-4 space-y-3">
-            <div>
-              <p className="text-sm font-mono text-gold tracking-widest">
-                GLOBAL DATA
-              </p>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Shared knowledge, rules & cause-effect chains
-              </p>
+            <Separator className="bg-border" />
+
+            {/* Global Data */}
+            <div className="border border-border rounded-md p-4 space-y-3">
+              <div>
+                <p className="text-sm font-mono text-gold tracking-widest">
+                  GLOBAL DATA
+                </p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Shared knowledge, rules & cause-effect chains
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  className="flex-1 bg-gold border-gold text-black font-bold hover:bg-gold-bright font-mono text-xs"
+                  onClick={handleExportGlobal}
+                  disabled={exportGlobal.isPending}
+                  data-ocid="global_data.export_button"
+                >
+                  <Download className="w-3 h-3 mr-1" />
+                  {exportGlobal.isPending ? "EXPORTING..." : "EXPORT"}
+                </Button>
+                <Button
+                  variant="outline"
+                  className="flex-1 border-gold/40 text-gold hover:bg-gold/10 font-mono text-xs"
+                  onClick={() => globalFileRef.current?.click()}
+                  disabled={importGlobal.isPending}
+                  data-ocid="global_data.upload_button"
+                >
+                  <Upload className="w-3 h-3 mr-1" />
+                  {importGlobal.isPending ? "IMPORTING..." : "IMPORT"}
+                </Button>
+                <input
+                  ref={globalFileRef}
+                  type="file"
+                  accept=".json"
+                  className="hidden"
+                  onChange={handleImportGlobal}
+                />
+              </div>
             </div>
-            <div className="flex gap-2">
-              <Button
-                variant="outline"
-                className="flex-1 bg-gold border-gold text-black font-bold hover:bg-gold-bright font-mono text-xs"
-                onClick={handleExportGlobal}
-                disabled={exportGlobal.isPending}
-                data-ocid="global_data.export_button"
-              >
-                <Download className="w-3 h-3 mr-1" />
-                {exportGlobal.isPending ? "EXPORTING..." : "EXPORT"}
-              </Button>
-              <Button
-                variant="outline"
-                className="flex-1 border-gold/40 text-gold hover:bg-gold/10 font-mono text-xs"
-                onClick={() => globalFileRef.current?.click()}
-                disabled={importGlobal.isPending}
-                data-ocid="global_data.upload_button"
-              >
-                <Upload className="w-3 h-3 mr-1" />
-                {importGlobal.isPending ? "IMPORTING..." : "IMPORT"}
-              </Button>
-              <input
-                ref={globalFileRef}
-                type="file"
-                accept=".json"
-                className="hidden"
-                onChange={handleImportGlobal}
-              />
-            </div>
-          </div>
-        </div>
+          </TabsContent>
+
+          <TabsContent value="theme" className="mt-0">
+            <ThemeEditor />
+          </TabsContent>
+
+          <TabsContent value="font" className="mt-0">
+            <FontPicker
+              currentFont={currentFont}
+              onFontChange={setCurrentFont}
+            />
+          </TabsContent>
+        </Tabs>
       </DialogContent>
     </Dialog>
   );

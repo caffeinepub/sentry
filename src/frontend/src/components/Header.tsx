@@ -1,11 +1,21 @@
 import { Button } from "@/components/ui/button";
-import { Brain, Cpu, HelpCircle, LogOut, Settings, Users } from "lucide-react";
+import {
+  Brain,
+  Copy,
+  Cpu,
+  HelpCircle,
+  LogOut,
+  Palette,
+  Settings,
+  Users,
+} from "lucide-react";
 import { getCurrentUser, logout } from "../utils/localAuth";
 
 interface HeaderProps {
   onHelpOpen: () => void;
   onSettingsOpen: () => void;
   onUserManagement: () => void;
+  onCloneAI: () => void;
   onLogout: () => void;
   onBrainToggle?: () => void;
   brainOpen?: boolean;
@@ -16,6 +26,7 @@ export default function Header({
   onHelpOpen,
   onSettingsOpen,
   onUserManagement,
+  onCloneAI,
   onLogout,
   onBrainToggle,
   brainOpen,
@@ -70,9 +81,30 @@ export default function Header({
           size="icon"
           className="text-muted-foreground hover:text-gold w-8 h-8"
           onClick={onSettingsOpen}
+          title="Settings & Theme"
           data-ocid="settings.open_modal_button"
         >
           <Settings className="w-4 h-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="text-muted-foreground hover:text-gold w-8 h-8"
+          onClick={onSettingsOpen}
+          title="Chat Theme"
+          data-ocid="theme.open_modal_button"
+        >
+          <Palette className="w-4 h-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="text-muted-foreground hover:text-gold w-8 h-8"
+          onClick={onCloneAI}
+          title="Clone AI Profile"
+          data-ocid="clone_ai.open_modal_button"
+        >
+          <Copy className="w-4 h-4" />
         </Button>
         <Button
           variant="ghost"

@@ -943,18 +943,8 @@ export default function ChatPanel() {
         else if (file.type.startsWith("audio/")) type = "audio";
         else if (file.type.startsWith("video/")) type = "video";
 
-        // Keep the full data URL in memory so the GIF/image shows immediately.
-        // saveChatMessages will convert it to an idb: reference when persisting.
-        // Also pre-store in IndexedDB in background for faster reload after refresh.
+        // Keep the full data URL in memory so GIF/image shows immediately.
         const attUrl = dataUrl;
-        try {
-          const { storeAttachment } = await import("../utils/attachmentStore");
-          const safeKey = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-          const attachKey = `att_${Date.now()}_${safeKey}`;
-          storeAttachment(attachKey, dataUrl); // fire-and-forget — don't await
-        } catch {
-          // IndexedDB unavailable — data URL still works in-session
-        }
 
         const userMsg = addMessage({
           role: "user",
@@ -965,6 +955,17 @@ export default function ChatPanel() {
             { type, url: attUrl, name: file.name, mimeType: file.type },
           ],
         });
+
+        // Pre-store in IndexedDB with the EXACT key saveChatMessages will use,
+        // ensuring data is in IDB before the state update triggers saveChatMessages.
+        try {
+          const { storeAttachment } = await import("../utils/attachmentStore");
+          const idbKey = `att_${userMsg.id}_${file.name}`;
+          await storeAttachment(idbKey, dataUrl);
+        } catch {
+          // IndexedDB unavailable — data URL still works in-session
+        }
+
         persistMessage(userMsg);
         setTimeout(() => {
           const sentryMsg = addMessage({

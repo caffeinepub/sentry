@@ -2,9 +2,10 @@ import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Toaster } from "@/components/ui/sonner";
 import { Brain, ChevronLeft, ChevronRight, Cpu } from "lucide-react";
 import { motion } from "motion/react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import BrainVisualization from "./components/BrainVisualization";
 import ChatPanel from "./components/ChatPanel";
+import CloneAIDialog from "./components/CloneAIDialog";
 import Header from "./components/Header";
 import HelpModal from "./components/HelpModal";
 import ImportExportPanel from "./components/ImportExportPanel";
@@ -12,13 +13,16 @@ import LoginScreen from "./components/LoginScreen";
 import MemoryExplorer from "./components/MemoryExplorer";
 import UserManagement from "./components/UserManagement";
 import { useActor } from "./hooks/useActor";
+import { applyFont, getSavedFont } from "./utils/fontManager";
 import { isLoggedIn } from "./utils/localAuth";
+import { applyTheme, loadActiveTheme } from "./utils/themeManager";
 
 export default function App() {
   const [loggedIn, setLoggedIn] = useState(() => isLoggedIn());
   const [helpOpen, setHelpOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [userMgmtOpen, setUserMgmtOpen] = useState(false);
+  const [cloneAIOpen, setCloneAIOpen] = useState(false);
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
   const [mobileMemoryOpen, setMobileMemoryOpen] = useState(false);
@@ -26,6 +30,14 @@ export default function App() {
 
   // Actor initializes in background — never block UI on this
   const { isFetching: actorInitializing } = useActor();
+
+  // Apply saved theme and font on mount
+  useEffect(() => {
+    const theme = loadActiveTheme();
+    applyTheme(theme);
+    const font = getSavedFont();
+    if (font) applyFont(font);
+  }, []);
 
   const currentYear = new Date().getFullYear();
 
@@ -39,6 +51,7 @@ export default function App() {
         onHelpOpen={() => setHelpOpen(true)}
         onSettingsOpen={() => setSettingsOpen(true)}
         onUserManagement={() => setUserMgmtOpen(true)}
+        onCloneAI={() => setCloneAIOpen(true)}
         onLogout={() => setLoggedIn(false)}
         onBrainToggle={() => {
           setRightOpen((v) => !v);
@@ -203,6 +216,7 @@ export default function App() {
         open={userMgmtOpen}
         onClose={() => setUserMgmtOpen(false)}
       />
+      <CloneAIDialog open={cloneAIOpen} onClose={() => setCloneAIOpen(false)} />
       <Toaster theme="dark" position="bottom-right" />
     </div>
   );
