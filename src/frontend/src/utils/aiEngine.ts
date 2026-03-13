@@ -31,6 +31,71 @@ function fuzzyWordMatch(word: string, text: string): boolean {
   return words.some((w) => w.length >= 4 && levenshtein(word, w) <= 2);
 }
 
+/**
+ * Given a word, find the closest known concept/word from memories and rules.
+ * Returns the closest match if within typo distance (<=3), otherwise the original word.
+ */
+function resolveToClosestConcept(
+  word: string,
+  memories: Memory[],
+  rules: Rule[],
+): string {
+  if (word.length < 4) return word;
+  const lw = word.toLowerCase();
+  const known = new Set<string>();
+  for (const m of memories) {
+    for (const c of m.concepts) {
+      for (const w of c.toLowerCase().split(/\s+/)) {
+        if (w.length >= 4) known.add(w);
+      }
+    }
+    for (const w of m.text.toLowerCase().split(/\s+/)) {
+      if (w.length >= 4) known.add(w);
+    }
+  }
+  for (const r of rules) {
+    for (const w of r.condition.toLowerCase().split(/\s+/)) {
+      if (w.length >= 4) known.add(w);
+    }
+    for (const w of r.effect.toLowerCase().split(/\s+/)) {
+      if (w.length >= 4) known.add(w);
+    }
+  }
+  let bestWord = word;
+  let bestDist = 3; // max allowed typo distance
+  for (const k of known) {
+    if (k === lw) return word; // exact match, no change needed
+    const d = levenshtein(lw, k);
+    if (d < bestDist) {
+      bestDist = d;
+      bestWord = k;
+    }
+  }
+  return bestDist <= 2 ? bestWord : word;
+}
+
+/**
+ * Normalise a message by resolving typo'd words to the closest known concept.
+ * Preserves original casing where possible.
+ */
+export function normalizeTyposInMessage(
+  text: string,
+  memories: Memory[],
+  rules: Rule[],
+): string {
+  return text
+    .split(/\s+/)
+    .map((token) => {
+      const clean = token.replace(/[^a-zA-Z]/g, "").toLowerCase();
+      if (clean.length < 4) return token;
+      const resolved = resolveToClosestConcept(clean, memories, rules);
+      return resolved !== clean
+        ? token.replace(new RegExp(clean, "i"), resolved)
+        : token;
+    })
+    .join(" ");
+}
+
 const POSITIVE_KEYWORDS = [
   "great",
   "amazing",
@@ -712,7 +777,7 @@ export function buildIdentityResponse(
 export function generateAIResponse(
   userMessage: string,
   memories: Memory[],
-  _rules: Rule[],
+  rules: Rule[],
   personality: PersonalityProfile,
   _messageCount: number,
   detectedConcepts?: DetectedConcepts,
@@ -721,8 +786,14 @@ export function generateAIResponse(
   personalityDelta: Partial<PersonalityProfile>;
   isConfused?: boolean;
 } {
-  const tone = detectEmotionalTone(userMessage);
-  const relevant = findRelevantMemories(userMessage, memories);
+  // Normalize typos in user message to closest known concepts before processing
+  const normalizedMessage = normalizeTyposInMessage(
+    userMessage,
+    memories,
+    rules,
+  );
+  const tone = detectEmotionalTone(normalizedMessage);
+  const relevant = findRelevantMemories(normalizedMessage, memories);
   const delta: Partial<PersonalityProfile> = {};
 
   if (tone === "positive")
@@ -739,7 +810,7 @@ export function generateAIResponse(
       (delta.friendliness ?? personality.friendliness) + 0.01,
     );
 
-  const lower = userMessage.toLowerCase();
+  const lower = normalizedMessage.toLowerCase();
   let response = "";
 
   // Occasional curiosity follow-up questions (15% chance)

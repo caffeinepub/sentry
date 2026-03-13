@@ -193,31 +193,50 @@ function renderContent(content: string) {
 }
 
 function AttachmentDisplay({ attachment }: { attachment: Attachment }) {
+  // Resolve idb: references to real data URLs on the fly
+  const [resolvedUrl, setResolvedUrl] = useState<string>(() =>
+    attachment.url?.startsWith("idb:") ? "" : attachment.url || "",
+  );
+  useEffect(() => {
+    if (attachment.url?.startsWith("idb:")) {
+      import("../utils/attachmentStore").then(({ loadAttachment }) => {
+        loadAttachment(attachment.url.slice(4)).then((data) => {
+          if (data) setResolvedUrl(data);
+        });
+      });
+    } else {
+      setResolvedUrl(attachment.url || "");
+    }
+  }, [attachment.url]);
+
   if (attachment.type === "gif") {
+    if (!resolvedUrl)
+      return (
+        <span className="text-xs text-muted-foreground font-mono italic">
+          [GIF loading…]
+        </span>
+      );
     return (
       <img
-        key={attachment.url.slice(0, 60)}
-        src={attachment.url}
+        src={resolvedUrl}
         alt={attachment.name || "GIF"}
         loading="eager"
         decoding="async"
         className="max-w-xs max-h-48 rounded border border-border mt-1"
         style={{ display: "block", imageRendering: "auto" }}
-        onError={(e) => {
-          const target = e.currentTarget;
-          target.style.display = "none";
-          const fallback = document.createElement("span");
-          fallback.className = "text-xs text-muted-foreground font-mono";
-          fallback.textContent = `[GIF: ${attachment.name || "failed to load"}]`;
-          target.parentNode?.appendChild(fallback);
-        }}
       />
     );
   }
   if (attachment.type === "image") {
+    if (!resolvedUrl)
+      return (
+        <span className="text-xs text-muted-foreground font-mono italic">
+          [image loading…]
+        </span>
+      );
     return (
       <img
-        src={attachment.url}
+        src={resolvedUrl}
         alt={attachment.name || "attachment"}
         className="max-w-xs max-h-48 rounded border border-border object-contain mt-1"
       />
@@ -225,7 +244,11 @@ function AttachmentDisplay({ attachment }: { attachment: Attachment }) {
   }
   if (attachment.type === "audio") {
     return (
-      <audio controls src={attachment.url} className="mt-1 max-w-xs">
+      <audio
+        controls
+        src={resolvedUrl || attachment.url}
+        className="mt-1 max-w-xs"
+      >
         <track kind="captions" />
       </audio>
     );
@@ -234,7 +257,7 @@ function AttachmentDisplay({ attachment }: { attachment: Attachment }) {
     return (
       <video
         controls
-        src={attachment.url}
+        src={resolvedUrl || attachment.url}
         className="mt-1 max-w-xs max-h-36 rounded border border-border"
       >
         <track kind="captions" />
@@ -255,7 +278,7 @@ function AttachmentDisplay({ attachment }: { attachment: Attachment }) {
   }
   return (
     <a
-      href={attachment.url}
+      href={resolvedUrl || attachment.url}
       download={attachment.name}
       className="flex items-center gap-1 text-xs text-muted-foreground hover:text-gold mt-1 border border-border rounded px-2 py-1 w-fit"
     >
@@ -417,6 +440,18 @@ export default function ChatPanel() {
       }
     }, 30_000);
     return () => clearInterval(interval);
+  }, [messages]);
+
+  // Save before page unload so refresh never loses messages
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      const u = getCurrentUser() || "";
+      if (u && messages.length > 0) {
+        saveChatMessages(u, messages);
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, [messages]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: scroll trigger
@@ -799,7 +834,10 @@ export default function ChatPanel() {
         return;
       }
 
-      const detected = detectConceptsFromNaturalLanguage(text, currentUsername);
+      const detected = detectConceptsFromNaturalLanguage(
+        text,
+        getCurrentUser() || currentUsername,
+      );
 
       for (const rule of detected.rules) {
         if (isAdmin) {
@@ -897,20 +935,35 @@ export default function ChatPanel() {
     const files = Array.from(e.target.files || []);
     for (const file of files) {
       const reader = new FileReader();
-      reader.onload = (ev) => {
-        const url = ev.target?.result as string;
+      reader.onload = async (ev) => {
+        const dataUrl = ev.target?.result as string;
         let type: Attachment["type"] = "file";
         if (file.type.startsWith("image/gif")) type = "gif";
         else if (file.type.startsWith("image/")) type = "image";
         else if (file.type.startsWith("audio/")) type = "audio";
         else if (file.type.startsWith("video/")) type = "video";
 
+        // Store binary data in IndexedDB immediately (before adding to state)
+        // so it survives page refresh without race conditions.
+        let attUrl = dataUrl;
+        try {
+          const { storeAttachment } = await import("../utils/attachmentStore");
+          const safeKey = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+          const attachKey = `att_${Date.now()}_${safeKey}`;
+          await storeAttachment(attachKey, dataUrl);
+          attUrl = `idb:${attachKey}`;
+        } catch {
+          // Fall back to data URL — won't persist across sessions but works now
+        }
+
         const userMsg = addMessage({
           role: "user",
           name: currentUsername,
           avatarUrl: userAvatarUrl,
           content: "",
-          attachments: [{ type, url, name: file.name, mimeType: file.type }],
+          attachments: [
+            { type, url: attUrl, name: file.name, mimeType: file.type },
+          ],
         });
         persistMessage(userMsg);
         setTimeout(() => {
