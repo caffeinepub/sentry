@@ -1,5 +1,36 @@
 import type { Memory, PersonalityProfile, Rule } from "../backend.d";
 
+// ── Fuzzy matching for typo tolerance ─────────────────────────────────────────
+function levenshtein(a: string, b: string): number {
+  const m = a.length;
+  const n = b.length;
+  const dp: number[][] = Array.from({ length: m + 1 }, (_, i) =>
+    Array.from({ length: n + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0)),
+  );
+  for (let i = 1; i <= m; i++)
+    for (let j = 1; j <= n; j++)
+      dp[i][j] =
+        a[i - 1] === b[j - 1]
+          ? dp[i - 1][j - 1]
+          : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+  return dp[m][n];
+}
+
+export function fuzzyStartsWith(
+  input: string,
+  prefix: string,
+  maxDist = 2,
+): boolean {
+  const candidate = input.slice(0, prefix.length + 2).toLowerCase();
+  return levenshtein(candidate, prefix.toLowerCase()) <= maxDist;
+}
+function fuzzyWordMatch(word: string, text: string): boolean {
+  if (text.toLowerCase().includes(word)) return true;
+  if (word.length < 4) return false;
+  const words = text.toLowerCase().split(/\s+/);
+  return words.some((w) => w.length >= 4 && levenshtein(word, w) <= 2);
+}
+
 const POSITIVE_KEYWORDS = [
   "great",
   "amazing",
@@ -77,8 +108,8 @@ export function findRelevantMemories(
     .map((m) => {
       const score = words.filter(
         (w) =>
-          m.text.toLowerCase().includes(w) ||
-          m.concepts.some((c) => c.toLowerCase().includes(w)),
+          fuzzyWordMatch(w, m.text) ||
+          m.concepts.some((c) => fuzzyWordMatch(w, c)),
       ).length;
       return { memory: m, score };
     })
@@ -685,7 +716,11 @@ export function generateAIResponse(
   personality: PersonalityProfile,
   _messageCount: number,
   detectedConcepts?: DetectedConcepts,
-): { response: string; personalityDelta: Partial<PersonalityProfile> } {
+): {
+  response: string;
+  personalityDelta: Partial<PersonalityProfile>;
+  isConfused?: boolean;
+} {
   const tone = detectEmotionalTone(userMessage);
   const relevant = findRelevantMemories(userMessage, memories);
   const delta: Partial<PersonalityProfile> = {};
@@ -817,6 +852,10 @@ export function generateAIResponse(
         "I'm following. Go on.",
         "What do you want to explore?",
       ];
+      if (Math.random() < 0.4) {
+        response = `"${userMessage}"?`;
+        return { response, personalityDelta: delta, isConfused: true };
+      }
       response =
         personality.curiosity > 0.6
           ? idleResponses[Math.floor(Math.random() * idleResponses.length)]

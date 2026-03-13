@@ -182,15 +182,36 @@ export function saveChatMessages(
   username: string,
   messages: ChatMessage[],
 ): void {
+  // Strip large data URLs from attachments before saving to avoid quota errors
+  const stripped = messages.map((msg) => ({
+    ...msg,
+    attachments: (msg.attachments || []).map((att) => {
+      if (att.url?.startsWith("data:") && att.url.length > 200000) {
+        return { ...att, url: att.url.slice(0, 200000), _truncated: true };
+      }
+      return att;
+    }),
+  }));
   try {
     localStorage.setItem(
       `sentry_chat_${username}`,
-      JSON.stringify(messages, (_k, v) =>
+      JSON.stringify(stripped, (_k, v) =>
         typeof v === "bigint" ? `__bigint__${v}` : v,
       ),
     );
   } catch {
-    // Ignore storage quota errors
+    // If still too large, save without attachments
+    try {
+      const noAttach = messages.map((msg) => ({ ...msg, attachments: [] }));
+      localStorage.setItem(
+        `sentry_chat_${username}`,
+        JSON.stringify(noAttach, (_k, v) =>
+          typeof v === "bigint" ? `__bigint__${v}` : v,
+        ),
+      );
+    } catch {
+      // Nothing we can do
+    }
   }
 }
 

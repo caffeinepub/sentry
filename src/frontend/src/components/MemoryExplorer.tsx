@@ -329,216 +329,217 @@ export default function MemoryExplorer({ onMemoryClick }: MemoryExplorerProps) {
       </div>
 
       {/* Concepts tab */}
-      {activeTab === "concepts" ? (
-        <ScrollArea className="flex-1">
-          {filteredConcepts.length === 0 ? (
-            <div
-              className="flex flex-col items-center justify-center h-32 gap-2"
-              data-ocid="memory.empty_state"
-            >
-              <Network className="w-8 h-8 text-muted-foreground/30" />
-              <span className="text-xs text-muted-foreground font-mono">
-                NO CONCEPTS YET
-              </span>
-              <span className="text-[10px] text-muted-foreground/50 font-mono text-center px-4">
-                Talk to Sentry — concepts are extracted automatically
-              </span>
-            </div>
-          ) : (
-            <div className="px-3 pb-3 space-y-1">
-              <p className="text-[9px] font-mono text-gold/40 tracking-widest py-1">
-                {filteredConcepts.length} LEARNED CONCEPTS
-              </p>
-              {filteredConcepts.map((concept, idx) => (
-                <button
-                  key={concept.name}
-                  type="button"
-                  className="w-full text-left group flex gap-2 p-2 rounded border border-border hover:border-gold/30 transition-all"
-                  onClick={() => onMemoryClick?.(concept.name)}
-                  data-ocid={
-                    idx === 0
-                      ? "memory.item.1"
-                      : idx === 1
-                        ? "memory.item.2"
-                        : idx === 2
-                          ? "memory.item.3"
-                          : undefined
-                  }
-                >
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1.5 mb-0.5">
-                      <span
-                        className={`text-[9px] px-1.5 py-0.5 rounded font-mono capitalize ${
-                          concept.type === "rule"
-                            ? "badge-rule"
-                            : concept.type === "prediction"
-                              ? "badge-prediction"
-                              : concept.type === "personal"
-                                ? "badge-personal"
-                                : "badge-knowledge"
-                        }`}
-                      >
-                        {concept.type}
-                      </span>
-                      {concept.count > 1 && (
-                        <span className="text-[9px] font-mono text-gold/50">
-                          ×{concept.count}
+      <div className="flex-1 min-h-0 overflow-hidden" style={{ minHeight: 0 }}>
+        {activeTab === "concepts" ? (
+          <ScrollArea className="h-full" style={{ overflowY: "auto" }}>
+            {filteredConcepts.length === 0 ? (
+              <div
+                className="flex flex-col items-center justify-center h-32 gap-2"
+                data-ocid="memory.empty_state"
+              >
+                <Network className="w-8 h-8 text-muted-foreground/30" />
+                <span className="text-xs text-muted-foreground font-mono">
+                  NO CONCEPTS YET
+                </span>
+                <span className="text-[10px] text-muted-foreground/50 font-mono text-center px-4">
+                  Talk to Sentry — concepts are extracted automatically
+                </span>
+              </div>
+            ) : (
+              <div className="px-3 pb-3 space-y-1">
+                <p className="text-[9px] font-mono text-gold/40 tracking-widest py-1">
+                  {filteredConcepts.length} LEARNED CONCEPTS
+                </p>
+                {filteredConcepts.map((concept, idx) => (
+                  <button
+                    key={concept.name}
+                    type="button"
+                    className="w-full text-left group flex gap-2 p-2 rounded border border-border hover:border-gold/30 transition-all"
+                    onClick={() => onMemoryClick?.(concept.name)}
+                    data-ocid={
+                      idx === 0
+                        ? "memory.item.1"
+                        : idx === 1
+                          ? "memory.item.2"
+                          : idx === 2
+                            ? "memory.item.3"
+                            : undefined
+                    }
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5 mb-0.5">
+                        <span
+                          className={`text-[9px] px-1.5 py-0.5 rounded font-mono capitalize ${
+                            concept.type === "rule"
+                              ? "badge-rule"
+                              : concept.type === "prediction"
+                                ? "badge-prediction"
+                                : concept.type === "personal"
+                                  ? "badge-personal"
+                                  : "badge-knowledge"
+                          }`}
+                        >
+                          {concept.type}
                         </span>
+                        {concept.count > 1 && (
+                          <span className="text-[9px] font-mono text-gold/50">
+                            ×{concept.count}
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-xs text-gold font-mono">
+                        {concept.name}
+                      </span>
+                      {concept.sources[0] && (
+                        <p className="text-[9px] text-muted-foreground/60 line-clamp-1 mt-0.5">
+                          {concept.sources[0].slice(0, 60)}
+                          {concept.sources[0].length > 60 ? "..." : ""}
+                        </p>
                       )}
                     </div>
-                    <span className="text-xs text-gold font-mono">
-                      {concept.name}
-                    </span>
-                    {concept.sources[0] && (
-                      <p className="text-[9px] text-muted-foreground/60 line-clamp-1 mt-0.5">
-                        {concept.sources[0].slice(0, 60)}
-                        {concept.sources[0].length > 60 ? "..." : ""}
-                      </p>
-                    )}
-                  </div>
-                  <div className="shrink-0 self-center">
-                    <Network className="w-3 h-3 text-gold/20 group-hover:text-gold/50 transition-colors" />
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
-        </ScrollArea>
-      ) : (
-        /* Memory list */
-        <ScrollArea className="flex-1">
-          {filtered.length === 0 ? (
-            <div
-              className="flex flex-col items-center justify-center h-32 gap-2"
-              data-ocid="memory.empty_state"
-            >
-              <Brain className="w-8 h-8 text-muted-foreground/30" />
-              <span className="text-xs text-muted-foreground font-mono">
-                NO MEMORIES
-              </span>
-            </div>
-          ) : (
-            <div className="px-3 pb-3 space-y-1.5">
-              {filtered.map((item, idx) => (
-                <div
-                  key={item.id.toString()}
-                  className="group flex gap-2 p-2.5 rounded border border-border hover:border-gold/30 transition-all"
-                  data-ocid={
-                    idx === 0
-                      ? "memory.item.1"
-                      : idx === 1
-                        ? "memory.item.2"
-                        : idx === 2
-                          ? "memory.item.3"
-                          : undefined
-                  }
-                >
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1.5 mb-1">
-                      <span
-                        className={`text-[9px] px-1.5 py-0.5 rounded font-mono capitalize ${
-                          item.memoryType === "rule"
-                            ? "badge-rule"
-                            : item.memoryType === "history"
-                              ? "badge-history"
-                              : item.memoryType === "personal"
-                                ? "badge-personal"
-                                : item.memoryType === "prediction"
-                                  ? "badge-prediction"
-                                  : "badge-knowledge"
-                        }`}
-                      >
-                        {item.memoryType}
-                      </span>
-                      <span className="text-[10px] text-muted-foreground font-mono">
-                        {formatTs(item.timestamp)}
-                      </span>
-                      {item.isGlobal && !item.isRule && (
-                        <span className="text-[8px] font-mono text-gold/40 tracking-widest">
-                          SHARED
+                    <div className="shrink-0 self-center">
+                      <Network className="w-3 h-3 text-gold/20 group-hover:text-gold/50 transition-colors" />
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </ScrollArea>
+        ) : (
+          /* Memory list */
+          <ScrollArea className="h-full" style={{ overflowY: "auto" }}>
+            {filtered.length === 0 ? (
+              <div
+                className="flex flex-col items-center justify-center h-32 gap-2"
+                data-ocid="memory.empty_state"
+              >
+                <Brain className="w-8 h-8 text-muted-foreground/30" />
+                <span className="text-xs text-muted-foreground font-mono">
+                  NO MEMORIES
+                </span>
+              </div>
+            ) : (
+              <div className="px-3 pb-3 space-y-1.5">
+                {filtered.map((item, idx) => (
+                  <div
+                    key={item.id.toString()}
+                    className="group flex gap-2 p-2.5 rounded border border-border hover:border-gold/30 transition-all"
+                    data-ocid={
+                      idx === 0
+                        ? "memory.item.1"
+                        : idx === 1
+                          ? "memory.item.2"
+                          : idx === 2
+                            ? "memory.item.3"
+                            : undefined
+                    }
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <span
+                          className={`text-[9px] px-1.5 py-0.5 rounded font-mono capitalize ${
+                            item.memoryType === "rule"
+                              ? "badge-rule"
+                              : item.memoryType === "history"
+                                ? "badge-history"
+                                : item.memoryType === "personal"
+                                  ? "badge-personal"
+                                  : item.memoryType === "prediction"
+                                    ? "badge-prediction"
+                                    : "badge-knowledge"
+                          }`}
+                        >
+                          {item.memoryType}
                         </span>
-                      )}
-                      {!item.isGlobal && (
-                        <span className="text-[8px] font-mono text-gold/40 tracking-widest">
-                          USER
+                        <span className="text-[10px] text-muted-foreground font-mono">
+                          {formatTs(item.timestamp)}
                         </span>
+                        {item.isGlobal && !item.isRule && (
+                          <span className="text-[8px] font-mono text-gold/40 tracking-widest">
+                            SHARED
+                          </span>
+                        )}
+                        {!item.isGlobal && (
+                          <span className="text-[8px] font-mono text-gold/40 tracking-widest">
+                            USER
+                          </span>
+                        )}
+                      </div>
+
+                      {editingId === item.id ? (
+                        <div className="flex gap-1 items-start">
+                          <Input
+                            value={editText}
+                            onChange={(e) => setEditText(e.target.value)}
+                            className="h-7 text-xs font-mono bg-input border-border flex-1"
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") saveEdit(item.id);
+                              if (e.key === "Escape") setEditingId(null);
+                            }}
+                            autoFocus
+                            data-ocid="memory.input"
+                          />
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="w-6 h-6 text-gold hover:bg-gold/10"
+                            onClick={() => saveEdit(item.id)}
+                            data-ocid="memory.save_button"
+                          >
+                            <Check className="w-3 h-3" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="w-6 h-6 text-muted-foreground"
+                            onClick={() => setEditingId(null)}
+                            data-ocid="memory.cancel_button"
+                          >
+                            <X className="w-3 h-3" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          className="text-xs text-foreground line-clamp-2 leading-relaxed w-full text-left"
+                          onClick={() => onMemoryClick?.(item.text)}
+                        >
+                          {item.text}
+                        </button>
                       )}
                     </div>
 
-                    {editingId === item.id ? (
-                      <div className="flex gap-1 items-start">
-                        <Input
-                          value={editText}
-                          onChange={(e) => setEditText(e.target.value)}
-                          className="h-7 text-xs font-mono bg-input border-border flex-1"
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") saveEdit(item.id);
-                            if (e.key === "Escape") setEditingId(null);
-                          }}
-                          autoFocus
-                          data-ocid="memory.input"
-                        />
+                    {editingId !== item.id && (
+                      <div className="flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 shrink-0">
+                        {!item.isRule && !item.isGlobal && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="w-6 h-6 text-muted-foreground hover:text-gold"
+                            onClick={() => startEdit(item.id, item.text)}
+                            data-ocid="memory.edit_button.1"
+                          >
+                            <Pencil className="w-3 h-3" />
+                          </Button>
+                        )}
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="w-6 h-6 text-gold hover:bg-gold/10"
-                          onClick={() => saveEdit(item.id)}
-                          data-ocid="memory.save_button"
+                          className="w-6 h-6 text-muted-foreground hover:text-destructive"
+                          onClick={() => handleDelete(item)}
+                          data-ocid="memory.delete_button.1"
                         >
-                          <Check className="w-3 h-3" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="w-6 h-6 text-muted-foreground"
-                          onClick={() => setEditingId(null)}
-                          data-ocid="memory.cancel_button"
-                        >
-                          <X className="w-3 h-3" />
+                          <Trash2 className="w-3 h-3" />
                         </Button>
                       </div>
-                    ) : (
-                      <button
-                        type="button"
-                        className="text-xs text-foreground line-clamp-2 leading-relaxed w-full text-left"
-                        onClick={() => onMemoryClick?.(item.text)}
-                      >
-                        {item.text}
-                      </button>
                     )}
                   </div>
-
-                  {editingId !== item.id && (
-                    <div className="flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 shrink-0">
-                      {!item.isRule && !item.isGlobal && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="w-6 h-6 text-muted-foreground hover:text-gold"
-                          onClick={() => startEdit(item.id, item.text)}
-                          data-ocid="memory.edit_button.1"
-                        >
-                          <Pencil className="w-3 h-3" />
-                        </Button>
-                      )}
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="w-6 h-6 text-muted-foreground hover:text-destructive"
-                        onClick={() => handleDelete(item)}
-                        data-ocid="memory.delete_button.1"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </ScrollArea>
-      )}
-
+                ))}
+              </div>
+            )}
+          </ScrollArea>
+        )}
+      </div>
       {/* Stats */}
       <div className="px-3 py-2 border-t border-border shrink-0">
         <p className="text-[10px] font-mono text-muted-foreground">

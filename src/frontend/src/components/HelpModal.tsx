@@ -34,6 +34,12 @@ const SECTIONS = [
     color: "badge-knowledge",
   },
   {
+    title: "HOW TO CONNECT CATEGORIES",
+    content:
+      "To connect categories through conversation, just mention both in the same message or conversation:\n\n  'Hypnosis and psychological engineering both work on the mind'\n  'Astral projection relates to occult practices'\n  'In subliminal making, you apply psychological engineering'\n\nSentry automatically links the categories when you discuss them together. Over time, it learns crossover rules — ask 'WHY does X relate to Y' to see the connection it found.\n\nYou can also say things like:\n  'This is similar to what I said about [category]'\n  'The same rule applies in [other category]'",
+    color: "badge-knowledge",
+  },
+  {
     title: "TEACH: command",
     content:
       "Teach Sentry general knowledge that becomes part of the global knowledge base.\n\nExample: TEACH: The speed of light is approximately 299,792 km/s",

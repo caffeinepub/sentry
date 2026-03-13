@@ -47,6 +47,7 @@ import {
   detectConceptsFromNaturalLanguage,
   detectCorrectionIntent,
   fetchLinkContent,
+  fuzzyStartsWith,
   generateAIResponse,
   interpretLink,
   interpretMediaAttachment,
@@ -191,7 +192,28 @@ function renderContent(content: string) {
 }
 
 function AttachmentDisplay({ attachment }: { attachment: Attachment }) {
-  if (attachment.type === "image" || attachment.type === "gif") {
+  if (attachment.type === "gif") {
+    return (
+      <img
+        key={attachment.url.slice(0, 60)}
+        src={attachment.url}
+        alt={attachment.name || "GIF"}
+        loading="eager"
+        decoding="async"
+        className="max-w-xs max-h-48 rounded border border-border mt-1"
+        style={{ display: "block", imageRendering: "auto" }}
+        onError={(e) => {
+          const target = e.currentTarget;
+          target.style.display = "none";
+          const fallback = document.createElement("span");
+          fallback.className = "text-xs text-muted-foreground font-mono";
+          fallback.textContent = `[GIF: ${attachment.name || "failed to load"}]`;
+          target.parentNode?.appendChild(fallback);
+        }}
+      />
+    );
+  }
+  if (attachment.type === "image") {
     return (
       <img
         src={attachment.url}
@@ -277,6 +299,9 @@ export default function ChatPanel() {
   const [confirmClearChat, setConfirmClearChat] = useState(false);
   const [awaitingCorrection, setAwaitingCorrection] = useState(false);
   const [correctionContext, setCorrectionContext] = useState("");
+  const [awaitingConfusion, setAwaitingConfusion] = useState(false);
+  const [confusedOriginalMessage, setConfusedOriginalMessage] = useState("");
+  const [confusedParaphrase, setConfusedParaphrase] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const sentryAvatarInputRef = useRef<HTMLInputElement>(null);
@@ -513,6 +538,63 @@ export default function ChatPanel() {
       const lower = text.toLowerCase().trim();
       const isAdmin = canTeachGlobal();
 
+      // --- Confusion repeat-back flow ---
+      if (awaitingConfusion) {
+        const lower2 = text.toLowerCase().trim();
+        if (
+          lower2.includes("that's how i'd say it") ||
+          lower2.includes("thats how id say it") ||
+          lower2.includes("that's how i would say it") ||
+          lower2.includes("thats how i would say it")
+        ) {
+          await addMemory
+            .mutateAsync({
+              text: `[user phrasing] ${confusedOriginalMessage}`,
+              memoryType: "personal" as const,
+              concepts: confusedOriginalMessage
+                .split(" ")
+                .filter((w) => w.length > 4)
+                .slice(0, 5),
+              isGlobal: false,
+            })
+            .catch(() => {});
+          setAwaitingConfusion(false);
+          setIsThinking(false);
+          const sentryMsg = addMessage({
+            role: "sentry",
+            content: "Got it — I've stored that as how you'd express it.",
+          });
+          persistMessage(sentryMsg);
+          return;
+        }
+        if (
+          lower2.includes("how you would say it") ||
+          lower2.includes("how you'd say it") ||
+          lower2.includes("how youd say it")
+        ) {
+          await addMemory
+            .mutateAsync({
+              text: `[sentry phrasing] ${confusedParaphrase}`,
+              memoryType: "personal" as const,
+              concepts: confusedParaphrase
+                .split(" ")
+                .filter((w) => w.length > 4)
+                .slice(0, 5),
+              isGlobal: false,
+            })
+            .catch(() => {});
+          setAwaitingConfusion(false);
+          setIsThinking(false);
+          const sentryMsg = addMessage({
+            role: "sentry",
+            content: "Noted — I'll remember to phrase it that way.",
+          });
+          persistMessage(sentryMsg);
+          return;
+        }
+        setAwaitingConfusion(false);
+      }
+
       // --- Correction flow ---
       if (awaitingCorrection) {
         // This message IS the correction
@@ -676,7 +758,7 @@ export default function ChatPanel() {
         return;
       }
 
-      if (lower.startsWith("why ")) {
+      if (lower.startsWith("why ") || fuzzyStartsWith(lower, "why ", 1)) {
         const query = text.slice(4).trim();
         const chain = buildReasoningChain(query, rules);
         const sentryMsg = addMessage({
@@ -688,7 +770,11 @@ export default function ChatPanel() {
         return;
       }
 
-      if (lower === "who are you" || lower === "who are you?") {
+      if (
+        lower === "who are you" ||
+        lower === "who are you?" ||
+        fuzzyStartsWith(lower, "who are you", 2)
+      ) {
         const sentryMsg = addMessage({
           role: "sentry",
           content: buildIdentityResponse(personality, timeline.length),
@@ -761,7 +847,7 @@ export default function ChatPanel() {
 
       await new Promise((res) => setTimeout(res, 600 + Math.random() * 600));
       const allMemories = [...globalMemories, ...userMemories];
-      const { response, personalityDelta } = generateAIResponse(
+      const { response, personalityDelta, isConfused } = generateAIResponse(
         text,
         allMemories,
         rules,
@@ -774,6 +860,11 @@ export default function ChatPanel() {
         updatePersonality.mutate({ ...personality, ...personalityDelta });
       }
 
+      if (isConfused) {
+        setAwaitingConfusion(true);
+        setConfusedOriginalMessage(text);
+        setConfusedParaphrase(response);
+      }
       const commandType =
         detected.predictions.length > 0 ? "prediction" : undefined;
       const sentryMsg = addMessage({
