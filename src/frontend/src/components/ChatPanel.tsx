@@ -232,47 +232,31 @@ function saveConvMessages(
   messages: ChatMessage[],
 ): void {
   const key = getConvMsgKey(username, convId);
-  // Store full data: URLs directly in localStorage for reliable persistence.
-  // This ensures GIFs/images are always available synchronously on page refresh.
+  // Replace large data: URLs with idb: keys before writing to localStorage.
+  // storeAttachment seeds memoryCache synchronously, so the IDB write is fire-and-forget.
+  // Store full data URLs directly - no idb: indirection to avoid blank images on refresh
+  const serializable = messages;
   try {
     localStorage.setItem(
       key,
-      JSON.stringify(messages, (_k, v) =>
+      JSON.stringify(serializable, (_k, v) =>
         typeof v === "bigint" ? `__bigint__${v}` : v,
       ),
     );
   } catch {
-    // localStorage quota exceeded — try with attachment URLs truncated to 500KB each
+    // Quota exceeded: try without attachments
     try {
-      const MAX_ATTACH = 500 * 1024;
-      const truncated = messages.map((msg) => ({
-        ...msg,
-        attachments: (msg.attachments || []).map((att) => {
-          if (att.url && att.url.length > MAX_ATTACH) {
-            return { ...att, url: att.url.slice(0, MAX_ATTACH) };
-          }
-          return att;
-        }),
-      }));
+      const noAttach = serializable.map((msg) => ({ ...msg, attachments: [] }));
       localStorage.setItem(
         key,
-        JSON.stringify(truncated, (_k, v) =>
+        JSON.stringify(noAttach, (_k, v) =>
           typeof v === "bigint" ? `__bigint__${v}` : v,
         ),
       );
     } catch {
-      // Last resort: save without attachments
-      try {
-        const noAttach = messages.map((msg) => ({ ...msg, attachments: [] }));
-        localStorage.setItem(
-          key,
-          JSON.stringify(noAttach, (_k, v) =>
-            typeof v === "bigint" ? `__bigint__${v}` : v,
-          ),
-        );
-      } catch {
-        // nothing we can do
-      }
+      console.warn(
+        "saveConvMessages: localStorage quota exceeded, messages not saved",
+      );
     }
   }
 }
@@ -295,6 +279,35 @@ function canTeachGlobal(): boolean {
   } catch {
     return false;
   }
+}
+
+/** Compress an image data URL to a JPEG at max 300x300 to fit in localStorage. */
+async function compressImageDataUrl(dataUrl: string): Promise<string> {
+  return new Promise((resolve) => {
+    const img = new window.Image();
+    img.onload = () => {
+      const MAX = 300;
+      let w = img.naturalWidth;
+      let h = img.naturalHeight;
+      if (w > MAX || h > MAX) {
+        const ratio = Math.min(MAX / w, MAX / h);
+        w = Math.round(w * ratio);
+        h = Math.round(h * ratio);
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        resolve(dataUrl);
+        return;
+      }
+      ctx.drawImage(img, 0, 0, w, h);
+      resolve(canvas.toDataURL("image/jpeg", 0.85));
+    };
+    img.onerror = () => resolve(dataUrl);
+    img.src = dataUrl;
+  });
 }
 
 /** Analyze image data URL via canvas to generate a description. */
@@ -1513,14 +1526,8 @@ export default function ChatPanel() {
             else if (file.type.startsWith("audio/")) type = "audio";
             else if (file.type.startsWith("video/")) type = "video";
 
-            // Pre-generate message ID so IDB key matches localStorage reference exactly.
-            // Await storeAttachment so memoryCache is populated before addMessage renders.
+            // Store the full dataUrl in the message so it renders immediately and persists.
             const msgId = crypto.randomUUID();
-            const idbKey = `att_${msgId}_${file.name}`;
-            await storeAttachment(idbKey, dataUrl).catch(console.warn);
-
-            // Store the full dataUrl in the message so it renders immediately.
-            // saveConvMessages replaces data: URLs with idb: keys for localStorage.
             const userMsg = addMessage({
               id: msgId,
               role: "user",
@@ -1645,10 +1652,16 @@ export default function ChatPanel() {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = async (ev) => {
-      const dataUrl = ev.target?.result as string;
-      // Save to per-profile localStorage key immediately
+      const raw = ev.target?.result as string;
+      // Compress before saving to avoid localStorage quota errors
+      const dataUrl = await compressImageDataUrl(raw);
       const pid = getActiveProfileId();
-      localStorage.setItem(`sentry_ai_avatar_${pid}`, dataUrl);
+      try {
+        localStorage.setItem(`sentry_ai_avatar_${pid}`, dataUrl);
+      } catch {
+        toast.error("Image too large to save. Please use a smaller image.");
+        return;
+      }
       setPerProfileAiAvatar(dataUrl);
       // Notify all panels (Header, MemoryExplorer) to refresh avatar
       window.dispatchEvent(new CustomEvent("sentry_ai_avatar_changed"));

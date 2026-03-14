@@ -70,6 +70,35 @@ function isTrainerForActiveProfile(username: string): boolean {
   }
 }
 
+/** Compress an image data URL to JPEG max 300x300 to fit localStorage. */
+async function compressImageDataUrl(dataUrl: string): Promise<string> {
+  return new Promise((resolve) => {
+    const img = new window.Image();
+    img.onload = () => {
+      const MAX = 300;
+      let w = img.naturalWidth;
+      let h = img.naturalHeight;
+      if (w > MAX || h > MAX) {
+        const ratio = Math.min(MAX / w, MAX / h);
+        w = Math.round(w * ratio);
+        h = Math.round(h * ratio);
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        resolve(dataUrl);
+        return;
+      }
+      ctx.drawImage(img, 0, 0, w, h);
+      resolve(canvas.toDataURL("image/jpeg", 0.85));
+    };
+    img.onerror = () => resolve(dataUrl);
+    img.src = dataUrl;
+  });
+}
+
 function canTeachGlobalForProfile(username: string): boolean {
   if (!username) return false;
   return isClass6(username) || isTrainerForActiveProfile(username);
@@ -137,6 +166,7 @@ export default function MemoryExplorer({ onMemoryClick }: MemoryExplorerProps) {
   );
 
   const [profileId, setProfileId] = useState<string>(getActiveProfileId);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   const [activeProfileName, setActiveProfileName] = useState<string>(() => {
     const pid = getActiveProfileId();
@@ -160,16 +190,19 @@ export default function MemoryExplorer({ onMemoryClick }: MemoryExplorerProps) {
         localStorage.getItem(`sentry_ai_avatar_${pid}`) || null,
       );
       setCanTeachGlobal(canTeachGlobalForProfile(username));
-      queryClient.invalidateQueries({ queryKey: ["sentryAvatar"] });
+      setRefreshKey((k) => k + 1);
       queryClient.invalidateQueries();
     };
     window.addEventListener("sentry_profile_changed", refresh);
     window.addEventListener("sentry_ai_name_changed", refresh);
     window.addEventListener("sentry_ai_avatar_changed", refresh);
+    // Fallback polling every 3 seconds to catch any missed events
+    const pollId = setInterval(refresh, 3000);
     return () => {
       window.removeEventListener("sentry_profile_changed", refresh);
       window.removeEventListener("sentry_ai_name_changed", refresh);
       window.removeEventListener("sentry_ai_avatar_changed", refresh);
+      clearInterval(pollId);
     };
   }, [username, queryClient]);
 
@@ -182,8 +215,9 @@ export default function MemoryExplorer({ onMemoryClick }: MemoryExplorerProps) {
   const _setSentryAvatar = useSetSentryAvatar();
   const updateMemory = useUpdateMemory();
 
-  // profileId used to keep sentryAvatar query reactive — suppress unused warning
+  // refreshKey forces re-render of all data sections on profile switch
   void profileId;
+  void refreshKey;
 
   const allMemories: MemoryItem[] = [
     ...globalMemories.map((m) => ({
@@ -320,12 +354,17 @@ export default function MemoryExplorer({ onMemoryClick }: MemoryExplorerProps) {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = async (ev) => {
-      const dataUrl = ev.target?.result as string;
+      const raw = ev.target?.result as string;
+      const dataUrl = await compressImageDataUrl(raw);
       const pid = getActiveProfileId();
-      localStorage.setItem(`sentry_ai_avatar_${pid}`, dataUrl);
+      try {
+        localStorage.setItem(`sentry_ai_avatar_${pid}`, dataUrl);
+      } catch {
+        toast.error("Image too large to save. Please use a smaller image.");
+        return;
+      }
       setActiveProfileAvatar(dataUrl);
       window.dispatchEvent(new CustomEvent("sentry_ai_avatar_changed"));
-      queryClient.invalidateQueries({ queryKey: ["sentryAvatar"] });
       toast.success("AI avatar updated.");
     };
     reader.readAsDataURL(file);
@@ -463,7 +502,7 @@ export default function MemoryExplorer({ onMemoryClick }: MemoryExplorerProps) {
   const totalCount = allMemories.length - deletedIds.size;
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full" key={refreshKey}>
       {/* AI Profile Header */}
       <div className="flex flex-col items-center py-3 px-3 border-b border-border shrink-0 gap-2">
         <button
