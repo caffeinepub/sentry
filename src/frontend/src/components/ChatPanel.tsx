@@ -232,39 +232,47 @@ function saveConvMessages(
   messages: ChatMessage[],
 ): void {
   const key = getConvMsgKey(username, convId);
-  // Always store all attachment data: URLs in IDB for reliable persistence.
-  // localStorage only holds compact idb: reference keys, avoiding quota issues.
-  const refMessages = messages.map((msg) => ({
-    ...msg,
-    attachments: (msg.attachments || []).map((att) => {
-      if (att.url?.startsWith("data:")) {
-        const attKey = `att_${msg.id}_${att.name || "file"}`;
-        // storeAttachment seeds the in-memory cache synchronously, then writes to IDB
-        storeAttachment(attKey, att.url).catch(console.warn);
-        return { ...att, url: `idb:${attKey}` };
-      }
-      return att;
-    }),
-  }));
+  // Store full data: URLs directly in localStorage for reliable persistence.
+  // This ensures GIFs/images are always available synchronously on page refresh.
   try {
     localStorage.setItem(
       key,
-      JSON.stringify(refMessages, (_k, v) =>
+      JSON.stringify(messages, (_k, v) =>
         typeof v === "bigint" ? `__bigint__${v}` : v,
       ),
     );
   } catch {
-    // Still too large (shouldn't happen with idb: refs) — save without attachments
+    // localStorage quota exceeded — try with attachment URLs truncated to 500KB each
     try {
-      const noAttach = messages.map((msg) => ({ ...msg, attachments: [] }));
+      const MAX_ATTACH = 500 * 1024;
+      const truncated = messages.map((msg) => ({
+        ...msg,
+        attachments: (msg.attachments || []).map((att) => {
+          if (att.url && att.url.length > MAX_ATTACH) {
+            return { ...att, url: att.url.slice(0, MAX_ATTACH) };
+          }
+          return att;
+        }),
+      }));
       localStorage.setItem(
         key,
-        JSON.stringify(noAttach, (_k, v) =>
+        JSON.stringify(truncated, (_k, v) =>
           typeof v === "bigint" ? `__bigint__${v}` : v,
         ),
       );
     } catch {
-      // nothing we can do
+      // Last resort: save without attachments
+      try {
+        const noAttach = messages.map((msg) => ({ ...msg, attachments: [] }));
+        localStorage.setItem(
+          key,
+          JSON.stringify(noAttach, (_k, v) =>
+            typeof v === "bigint" ? `__bigint__${v}` : v,
+          ),
+        );
+      } catch {
+        // nothing we can do
+      }
     }
   }
 }
@@ -927,7 +935,7 @@ export default function ChatPanel() {
   const addTimeline = useAddTimelineEntry();
   const updatePersonality = useUpdatePersonality();
   const setUserAvatar = useSetUserAvatar();
-  const setSentryAvatar = useSetSentryAvatar();
+  const _setSentryAvatar = useSetSentryAvatar();
 
   // Sync messages from canister into local state
   useEffect(() => {
@@ -1644,13 +1652,7 @@ export default function ChatPanel() {
       setPerProfileAiAvatar(dataUrl);
       // Notify all panels (Header, MemoryExplorer) to refresh avatar
       window.dispatchEvent(new CustomEvent("sentry_ai_avatar_changed"));
-      // Also attempt to sync to canister
-      try {
-        await setSentryAvatar.mutateAsync(dataUrl);
-        toast.success("AI avatar updated.");
-      } catch {
-        toast.success("AI avatar saved locally.");
-      }
+      toast.success("AI avatar updated.");
     };
     reader.readAsDataURL(file);
     e.target.value = "";

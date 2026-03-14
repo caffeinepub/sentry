@@ -161,6 +161,7 @@ export default function MemoryExplorer({ onMemoryClick }: MemoryExplorerProps) {
       );
       setCanTeachGlobal(canTeachGlobalForProfile(username));
       queryClient.invalidateQueries({ queryKey: ["sentryAvatar"] });
+      queryClient.invalidateQueries();
     };
     window.addEventListener("sentry_profile_changed", refresh);
     window.addEventListener("sentry_ai_name_changed", refresh);
@@ -178,7 +179,7 @@ export default function MemoryExplorer({ onMemoryClick }: MemoryExplorerProps) {
   const { data: sentryAvatar } = useGetSentryAvatar();
   const deleteMemory = useDeleteMemory();
   const deleteRule = useDeleteRule();
-  const setSentryAvatar = useSetSentryAvatar();
+  const _setSentryAvatar = useSetSentryAvatar();
   const updateMemory = useUpdateMemory();
 
   // profileId used to keep sentryAvatar query reactive — suppress unused warning
@@ -325,12 +326,7 @@ export default function MemoryExplorer({ onMemoryClick }: MemoryExplorerProps) {
       setActiveProfileAvatar(dataUrl);
       window.dispatchEvent(new CustomEvent("sentry_ai_avatar_changed"));
       queryClient.invalidateQueries({ queryKey: ["sentryAvatar"] });
-      try {
-        await setSentryAvatar.mutateAsync(dataUrl);
-        toast.success("AI avatar updated.");
-      } catch {
-        toast.success("AI avatar saved locally.");
-      }
+      toast.success("AI avatar updated.");
     };
     reader.readAsDataURL(file);
     e.target.value = "";
@@ -511,7 +507,6 @@ export default function MemoryExplorer({ onMemoryClick }: MemoryExplorerProps) {
                 if (e.key === "Escape") setEditingName(false);
               }}
               data-ocid="memory.input"
-              // biome-ignore lint/a11y/noAutofocus: inline edit
               autoFocus
             />
             <Button
