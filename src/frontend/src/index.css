@@ -344,3 +344,44 @@ button[class*="bg-"],
 .text-muted-foreground {
   color: oklch(var(--gold) / 0.55) !important;
 }
+
+/* ── Additional Theme Hardening ──────────────────────────────────────────── */
+/* Ensure DialogContent, sheets, popovers, cards stay black */
+[data-slot="dialog-content"],
+[role="dialog"],
+[data-radix-popper-content-wrapper] > div {
+  background-color: #000000 !important;
+}
+
+/* TabsTrigger gold text at all states */
+[role="tab"] {
+  color: oklch(var(--gold)) !important;
+  background-color: transparent !important;
+}
+[role="tab"][data-state="active"] {
+  background-color: #000000 !important;
+  color: oklch(var(--gold)) !important;
+}
+
+/* SelectTrigger, SelectContent gold theme */
+[data-slot="select-trigger"],
+[data-slot="select-content"] {
+  background-color: #000000 !important;
+  color: oklch(var(--gold)) !important;
+  border-color: oklch(var(--gold) / 0.4) !important;
+}
+
+/* Ensure all chat message bubbles are black */
+.sentry-message,
+.user-message {
+  background-color: #000000 !important;
+}
+
+/* Checkbox border gold */
+[data-slot="checkbox"] {
+  border-color: oklch(var(--gold) / 0.5) !important;
+}
+[data-slot="checkbox"][data-state="checked"] {
+  background-color: oklch(var(--gold)) !important;
+  border-color: oklch(var(--gold)) !important;
+}

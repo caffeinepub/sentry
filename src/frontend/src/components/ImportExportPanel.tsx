@@ -101,6 +101,82 @@ export default function ImportExportPanel({
     e.target.value = "";
   };
 
+  const offlineFileRef = useRef<HTMLInputElement>(null);
+
+  const handleExportOfflineApp = () => {
+    try {
+      const data: Record<string, string> = {};
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key?.startsWith("sentry_")) {
+          data[key] = localStorage.getItem(key) || "";
+        }
+      }
+      const jsonStr = JSON.stringify(data).replace(/<\/script>/gi, "</script>");
+      const html = `<!DOCTYPE html>
+<html>
+<head><title>Sentry Backup</title></head>
+<body style="background:#000;color:#FFD700;font-family:monospace;padding:2rem;">
+<h1>SENTRY BACKUP</h1>
+<p>Opening this file restores your Sentry data to this browser's localStorage.</p>
+<p id="status">Restoring data...</p>
+<script>
+window.__SENTRY_BACKUP__ = ${jsonStr};
+(function(){
+  var data = window.__SENTRY_BACKUP__;
+  var count = 0;
+  for(var k in data){if(Object.prototype.hasOwnProperty.call(data,k)){localStorage.setItem(k,data[k]);count++;}}
+  document.getElementById('status').textContent = 'Done! ' + count + ' items restored. You can now open the main Sentry app.';
+})();
+<\/script>
+</body>
+</html>`;
+      const blob = new Blob([html], { type: "text/html" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `sentry-offline-backup-${Date.now()}.html`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success(
+        `Offline backup exported (${Object.keys(data).length} keys).`,
+      );
+    } catch {
+      toast.error("Failed to export offline backup.");
+    }
+  };
+
+  const handleImportOfflineHtml = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const text = ev.target?.result as string;
+      try {
+        const match = text.match(
+          /window\.__SENTRY_BACKUP__\s*=\s*(\{[\s\S]*?\});/,
+        );
+        if (!match) {
+          toast.error("Invalid Sentry backup file.");
+          return;
+        }
+        const data: Record<string, string> = JSON.parse(match[1]);
+        let count = 0;
+        for (const [k, v] of Object.entries(data)) {
+          localStorage.setItem(k, v);
+          count++;
+        }
+        toast.success(
+          `${count} keys restored from offline backup. Refresh to apply.`,
+        );
+      } catch {
+        toast.error("Failed to parse offline backup file.");
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  };
+
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
       <DialogContent
@@ -229,6 +305,47 @@ export default function ImportExportPanel({
                   accept=".json"
                   className="hidden"
                   onChange={handleImportGlobal}
+                />
+              </div>
+            </div>
+
+            <Separator className="bg-border" />
+
+            {/* Offline App Backup */}
+            <div className="border border-border rounded-md p-4 space-y-3">
+              <div>
+                <p className="text-sm font-mono text-gold tracking-widest">
+                  OFFLINE BACKUP
+                </p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Export a self-contained HTML file to restore all data offline
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  className="flex-1 bg-gold border-gold text-black font-bold hover:bg-gold-bright font-mono text-xs"
+                  onClick={handleExportOfflineApp}
+                  data-ocid="offline_backup.export_button"
+                >
+                  <Download className="w-3 h-3 mr-1" />
+                  EXPORT HTML
+                </Button>
+                <Button
+                  variant="outline"
+                  className="flex-1 border-gold/40 text-gold hover:bg-gold/10 font-mono text-xs"
+                  onClick={() => offlineFileRef.current?.click()}
+                  data-ocid="offline_backup.upload_button"
+                >
+                  <Upload className="w-3 h-3 mr-1" />
+                  IMPORT HTML
+                </Button>
+                <input
+                  ref={offlineFileRef}
+                  type="file"
+                  accept=".html"
+                  className="hidden"
+                  onChange={handleImportOfflineHtml}
                 />
               </div>
             </div>

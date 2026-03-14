@@ -232,12 +232,14 @@ function saveConvMessages(
   messages: ChatMessage[],
 ): void {
   const key = getConvMsgKey(username, convId);
+  // Always store all attachment data: URLs in IDB for reliable persistence.
+  // localStorage only holds compact idb: reference keys, avoiding quota issues.
   const refMessages = messages.map((msg) => ({
     ...msg,
     attachments: (msg.attachments || []).map((att) => {
       if (att.url?.startsWith("data:")) {
         const attKey = `att_${msg.id}_${att.name || "file"}`;
-        // Use top-level import (not dynamic) so the IDB write starts immediately
+        // storeAttachment seeds the in-memory cache synchronously, then writes to IDB
         storeAttachment(attKey, att.url).catch(console.warn);
         return { ...att, url: `idb:${attKey}` };
       }
@@ -252,6 +254,7 @@ function saveConvMessages(
       ),
     );
   } catch {
+    // Still too large (shouldn't happen with idb: refs) — save without attachments
     try {
       const noAttach = messages.map((msg) => ({ ...msg, attachments: [] }));
       localStorage.setItem(
@@ -300,8 +303,8 @@ async function analyzeImageDataUrl(
       const h = img.naturalHeight || height || 0;
       try {
         const canvas = document.createElement("canvas");
-        canvas.width = Math.min(w, 80);
-        canvas.height = Math.min(h, 80);
+        canvas.width = Math.min(w, 120);
+        canvas.height = Math.min(h, 120);
         const ctx = canvas.getContext("2d");
         if (!ctx) {
           resolve(
@@ -311,41 +314,103 @@ async function analyzeImageDataUrl(
         }
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
         const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-        let r = 0;
-        let g = 0;
-        let b = 0;
-        let bright = 0;
-        const count = pixels.length / 4;
-        for (let i = 0; i < pixels.length; i += 4) {
-          r += pixels[i];
-          g += pixels[i + 1];
-          b += pixels[i + 2];
-          bright += (pixels[i] + pixels[i + 1] + pixels[i + 2]) / 3;
+
+        // Sample every 4th pixel for more coverage
+        let totalR = 0;
+        let totalG = 0;
+        let totalB = 0;
+        let totalBright = 0;
+        let hueCounts = new Array(12).fill(0); // 12 buckets of 30° each
+        let sampleCount = 0;
+
+        for (let i = 0; i < pixels.length; i += 16) {
+          // step by 4 pixels (4 channels each)
+          const r = pixels[i];
+          const g = pixels[i + 1];
+          const b = pixels[i + 2];
+          totalR += r;
+          totalG += g;
+          totalB += b;
+          totalBright += (r + g + b) / 3;
+          sampleCount++;
+
+          // Convert RGB to HSL to get hue
+          const rn = r / 255;
+          const gn = g / 255;
+          const bn = b / 255;
+          const max = Math.max(rn, gn, bn);
+          const min = Math.min(rn, gn, bn);
+          const l = (max + min) / 2;
+          const s =
+            max === min
+              ? 0
+              : l > 0.5
+                ? (max - min) / (2 - max - min)
+                : (max - min) / (max + min);
+          if (s > 0.15) {
+            // only count saturated pixels for hue
+            let h = 0;
+            if (max === rn) h = (((gn - bn) / (max - min) + 6) % 6) * 60;
+            else if (max === gn) h = ((bn - rn) / (max - min) + 2) * 60;
+            else h = ((rn - gn) / (max - min) + 4) * 60;
+            hueCounts[Math.floor(h / 30) % 12]++;
+          }
         }
-        r /= count;
-        g /= count;
-        b /= count;
-        bright /= count;
-        const tone =
-          r > g + 20 && r > b + 20
-            ? "warm reddish"
-            : g > r + 20 && g > b + 20
-              ? "cool green"
-              : b > r + 20 && b > g + 20
-                ? "blue-toned"
-                : r > 180 && g > 160 && b < 100
-                  ? "warm golden"
-                  : "neutral";
-        const lighting =
-          bright > 190
-            ? "very bright"
-            : bright > 130
-              ? "well-lit"
-              : bright > 70
-                ? "mid-toned"
-                : "dark";
+
+        if (sampleCount === 0) {
+          resolve(
+            `Received ${type === "gif" ? "an animated GIF" : "an image"}.`,
+          );
+          return;
+        }
+
+        const avgR = totalR / sampleCount;
+        const avgG = totalG / sampleCount;
+        const avgB = totalB / sampleCount;
+        const avgBright = totalBright / sampleCount;
+
+        // Detect dominant hue
+        const dominantBucket = hueCounts.indexOf(Math.max(...hueCounts));
+        const totalSaturated = hueCounts.reduce((a, b) => a + b, 0);
+        const avgRn = avgR / 255;
+        const avgGn = avgG / 255;
+        const avgBn = avgB / 255;
+        const maxC = Math.max(avgRn, avgGn, avgBn);
+        const minC = Math.min(avgRn, avgGn, avgBn);
+        const avgSat =
+          maxC === minC ? 0 : (maxC - minC) / (1 - Math.abs(maxC + minC - 1));
+
+        let colorDesc = "neutral";
+        if (avgSat < 0.12 || totalSaturated < sampleCount * 0.05) {
+          colorDesc = "black and white / grayscale";
+        } else {
+          const hue = dominantBucket * 30;
+          if (hue >= 330 || hue < 30) colorDesc = "red tones";
+          else if (hue < 60) colorDesc = "orange tones";
+          else if (hue < 90) colorDesc = "yellow/orange tones";
+          else if (hue < 150) colorDesc = "green tones";
+          else if (hue < 210) colorDesc = "cyan/teal tones";
+          else if (hue < 270) colorDesc = "blue tones";
+          else colorDesc = "purple/pink tones";
+        }
+
+        const lightDesc =
+          avgBright > 210
+            ? "bright/daytime scene"
+            : avgBright > 160
+              ? "well-lit scene"
+              : avgBright > 90
+                ? "mid-toned scene"
+                : avgBright > 40
+                  ? "dark/indoor scene"
+                  : "dark/night scene";
+
+        const prefix =
+          type === "gif"
+            ? "This animated GIF appears to show"
+            : "This appears to be";
         resolve(
-          `This ${type === "gif" ? "animated GIF" : "image"} is ${w}×${h}px with ${tone} tones and ${lighting} lighting.`,
+          `${prefix} a ${lightDesc} with ${colorDesc}, captured at ${w}×${h}.`,
         );
       } catch {
         resolve(
@@ -676,18 +741,32 @@ export default function ChatPanel() {
     return localStorage.getItem(getAiAvatarKey()) || "";
   });
 
-  // Warm the IDB memory cache for all idb: attachment keys on initial load
+  // Resolve idb: attachment refs in messages loaded from localStorage
   useEffect(() => {
     const u = getCurrentUser() || "";
-    const initialMessages = loadConvMessages(u, convId);
-    const idbKeys = initialMessages.flatMap((m) =>
-      (m.attachments || [])
-        .filter((a) => a.url?.startsWith("idb:"))
-        .map((a) => a.url.slice(4)),
+    const rawMsgs = loadConvMessages(u, convId);
+    const hasIdbRefs = rawMsgs.some((m) =>
+      (m.attachments || []).some((a) => a.url?.startsWith("idb:")),
     );
-    for (const key of idbKeys) {
-      loadAttachment(key);
-    }
+    if (!hasIdbRefs) return;
+    (async () => {
+      const resolved = await Promise.all(
+        rawMsgs.map(async (msg) => {
+          if (!(msg.attachments || []).some((a) => a.url?.startsWith("idb:")))
+            return msg;
+          const attachments = await Promise.all(
+            (msg.attachments || []).map(async (att) => {
+              if (!att.url?.startsWith("idb:")) return att;
+              const data = await loadAttachment(att.url.slice(4));
+              return data ? { ...att, url: data } : att;
+            }),
+          );
+          return { ...msg, attachments };
+        }),
+      );
+      const resolvedMap = new Map(resolved.map((m) => [m.id, m]));
+      setMessages((prev) => prev.map((m) => resolvedMap.get(m.id) ?? m));
+    })();
   }, [convId]);
 
   // Re-initialize conversations when the active AI profile changes
@@ -706,15 +785,32 @@ export default function ChatPanel() {
       setPerProfileAiAvatar(
         localStorage.getItem(`sentry_ai_avatar_${newPid}`) || "",
       );
-      // Re-warm IDB cache for new profile messages
-      const msgs = loadConvMessages(u, newConvId);
-      const idbKeys = msgs.flatMap((m) =>
-        (m.attachments || [])
-          .filter((a) => a.url?.startsWith("idb:"))
-          .map((a) => a.url.slice(4)),
+      // Resolve idb: refs in new profile messages
+      const newMsgs = loadConvMessages(u, newConvId);
+      const hasIdb = newMsgs.some((m) =>
+        (m.attachments || []).some((a) => a.url?.startsWith("idb:")),
       );
-      for (const key of idbKeys) {
-        loadAttachment(key);
+      if (hasIdb) {
+        (async () => {
+          const resolved = await Promise.all(
+            newMsgs.map(async (msg) => {
+              if (
+                !(msg.attachments || []).some((a) => a.url?.startsWith("idb:"))
+              )
+                return msg;
+              const attachments = await Promise.all(
+                (msg.attachments || []).map(async (att) => {
+                  if (!att.url?.startsWith("idb:")) return att;
+                  const data = await loadAttachment(att.url.slice(4));
+                  return data ? { ...att, url: data } : att;
+                }),
+              );
+              return { ...msg, attachments };
+            }),
+          );
+          const resolvedMap = new Map(resolved.map((m) => [m.id, m]));
+          setMessages((prev) => prev.map((m) => resolvedMap.get(m.id) ?? m));
+        })();
       }
     };
     const handleStorageChange = (e: StorageEvent) => {
@@ -1415,7 +1511,8 @@ export default function ChatPanel() {
             const idbKey = `att_${msgId}_${file.name}`;
             await storeAttachment(idbKey, dataUrl).catch(console.warn);
 
-            // Use the idb: reference in the message — data is already in IDB memory cache
+            // Store the full dataUrl in the message so it renders immediately.
+            // saveConvMessages replaces data: URLs with idb: keys for localStorage.
             const userMsg = addMessage({
               id: msgId,
               role: "user",
@@ -1425,7 +1522,7 @@ export default function ChatPanel() {
               attachments: [
                 {
                   type,
-                  url: `idb:${idbKey}`,
+                  url: dataUrl,
                   name: file.name,
                   mimeType: file.type,
                 },
@@ -1545,6 +1642,8 @@ export default function ChatPanel() {
       const pid = getActiveProfileId();
       localStorage.setItem(`sentry_ai_avatar_${pid}`, dataUrl);
       setPerProfileAiAvatar(dataUrl);
+      // Notify all panels (Header, MemoryExplorer) to refresh avatar
+      window.dispatchEvent(new CustomEvent("sentry_ai_avatar_changed"));
       // Also attempt to sync to canister
       try {
         await setSentryAvatar.mutateAsync(dataUrl);

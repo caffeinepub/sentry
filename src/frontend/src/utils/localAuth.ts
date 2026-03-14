@@ -11,16 +11,39 @@ const DEFAULT_CREDS: Credential[] = [
   { username: "Syndelious", password: "Leviathan" },
 ];
 
+// Additional users to seed on every install/upgrade
+const EXTRA_USERS: Credential[] = [
+  { username: "Wolpdragos", password: "Cloud" },
+  { username: "wolfi da furri", password: "Manic" },
+];
+
 export function getCredentials(): Credential[] {
   try {
     const raw = localStorage.getItem(AUTH_KEY);
+    let creds: Credential[];
     if (!raw) {
-      localStorage.setItem(AUTH_KEY, JSON.stringify(DEFAULT_CREDS));
-      return DEFAULT_CREDS;
+      creds = [...DEFAULT_CREDS];
+    } else {
+      creds = JSON.parse(raw) as Credential[];
     }
-    return JSON.parse(raw) as Credential[];
+    // Ensure extra users always exist (handles existing installs)
+    let modified = false;
+    for (const extra of EXTRA_USERS) {
+      if (
+        !creds.find(
+          (c) => c.username.toLowerCase() === extra.username.toLowerCase(),
+        )
+      ) {
+        creds.push(extra);
+        modified = true;
+      }
+    }
+    if (modified || !raw) {
+      localStorage.setItem(AUTH_KEY, JSON.stringify(creds));
+    }
+    return creds;
   } catch {
-    return DEFAULT_CREDS;
+    return [...DEFAULT_CREDS, ...EXTRA_USERS];
   }
 }
 

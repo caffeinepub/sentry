@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   Brain,
   Check,
@@ -128,9 +129,14 @@ export default function MemoryExplorer({ onMemoryClick }: MemoryExplorerProps) {
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
   const avatarInputRef = useRef<HTMLInputElement>(null);
+  const queryClient = useQueryClient();
 
   const username = getCurrentUser() || "";
-  const canTeachGlobal = canTeachGlobalForProfile(username);
+  const [canTeachGlobal, setCanTeachGlobal] = useState(() =>
+    canTeachGlobalForProfile(username),
+  );
+
+  const [profileId, setProfileId] = useState<string>(getActiveProfileId);
 
   const [activeProfileName, setActiveProfileName] = useState<string>(() => {
     const pid = getActiveProfileId();
@@ -146,12 +152,15 @@ export default function MemoryExplorer({ onMemoryClick }: MemoryExplorerProps) {
   useEffect(() => {
     const refresh = () => {
       const pid = getActiveProfileId();
+      setProfileId(pid);
       setActiveProfileName(
         localStorage.getItem(`sentry_ai_name_${pid}`) || "SENTRY",
       );
       setActiveProfileAvatar(
         localStorage.getItem(`sentry_ai_avatar_${pid}`) || null,
       );
+      setCanTeachGlobal(canTeachGlobalForProfile(username));
+      queryClient.invalidateQueries({ queryKey: ["sentryAvatar"] });
     };
     window.addEventListener("sentry_profile_changed", refresh);
     window.addEventListener("sentry_ai_name_changed", refresh);
@@ -161,7 +170,7 @@ export default function MemoryExplorer({ onMemoryClick }: MemoryExplorerProps) {
       window.removeEventListener("sentry_ai_name_changed", refresh);
       window.removeEventListener("sentry_ai_avatar_changed", refresh);
     };
-  }, []);
+  }, [username, queryClient]);
 
   const { data: globalMemories = [] } = useGetMemories(true);
   const { data: userMemories = [] } = useGetUserMemories();
@@ -171,6 +180,9 @@ export default function MemoryExplorer({ onMemoryClick }: MemoryExplorerProps) {
   const deleteRule = useDeleteRule();
   const setSentryAvatar = useSetSentryAvatar();
   const updateMemory = useUpdateMemory();
+
+  // profileId used to keep sentryAvatar query reactive — suppress unused warning
+  void profileId;
 
   const allMemories: MemoryItem[] = [
     ...globalMemories.map((m) => ({
@@ -312,6 +324,7 @@ export default function MemoryExplorer({ onMemoryClick }: MemoryExplorerProps) {
       localStorage.setItem(`sentry_ai_avatar_${pid}`, dataUrl);
       setActiveProfileAvatar(dataUrl);
       window.dispatchEvent(new CustomEvent("sentry_ai_avatar_changed"));
+      queryClient.invalidateQueries({ queryKey: ["sentryAvatar"] });
       try {
         await setSentryAvatar.mutateAsync(dataUrl);
         toast.success("AI avatar updated.");

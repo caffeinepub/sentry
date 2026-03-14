@@ -73,6 +73,7 @@ export function useGetMemories(isGlobal: boolean) {
       return actor.getMemories(isGlobal);
     },
     enabled: !!actor && !isFetching,
+    refetchInterval: 3000,
   });
 }
 
@@ -96,6 +97,7 @@ export function useGetRules() {
       return actor.getRules();
     },
     enabled: !!actor && !isFetching,
+    refetchInterval: 3000,
   });
 }
 
@@ -135,14 +137,11 @@ export function useGetKnowledgeEdges() {
 
 export function useGetSentryAvatar() {
   const { actor, isFetching } = useActor();
-  const activeAIName = localStorage.getItem("sentry_active_ai") || "default";
+  const pid = localStorage.getItem("sentry_active_profile") || "default";
   return useQuery<string>({
-    queryKey: ["sentryAvatar", activeAIName],
+    queryKey: ["sentryAvatar", pid],
     queryFn: async () => {
-      const localKey =
-        activeAIName !== "default"
-          ? `sentry_avatar_${activeAIName}`
-          : "sentry_avatar_v2";
+      const localKey = `sentry_ai_avatar_${pid}`;
       if (!actor)
         return (
           localStorage.getItem(localKey) ||
@@ -324,12 +323,8 @@ export function useSetSentryAvatar() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (url: string) => {
-      const activeAIName =
-        localStorage.getItem("sentry_active_ai") || "default";
-      const localKey =
-        activeAIName !== "default"
-          ? `sentry_avatar_${activeAIName}`
-          : "sentry_avatar_v2";
+      const pid = localStorage.getItem("sentry_active_profile") || "default";
+      const localKey = `sentry_ai_avatar_${pid}`;
       localStorage.setItem(localKey, url);
       if (!actor) return;
       try {
