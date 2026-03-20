@@ -1,12 +1,12 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { useQueryClient } from "@tanstack/react-query";
 import {
   Brain,
   Check,
   ChevronDown,
   ChevronRight,
+  Clock,
   Cpu,
   Network,
   Pencil,
@@ -19,14 +19,21 @@ import { toast } from "sonner";
 import {
   useDeleteMemory,
   useDeleteRule,
+  useDeleteTimelineEntry,
   useGetMemories,
   useGetRules,
   useGetSentryAvatar,
+  useGetTimeline,
   useGetUserMemories,
   useSetSentryAvatar,
   useUpdateMemory,
+  useUpdateTimelineEntry,
 } from "../hooks/useQueries";
-import { getCurrentUser, isClass6 } from "../utils/localAuth";
+import {
+  getCurrentUser,
+  isClass5ForProfile,
+  isClass6,
+} from "../utils/localAuth";
 import CategoryManager from "./CategoryManager";
 
 function formatTs(ts: bigint) {
@@ -41,6 +48,7 @@ interface MemoryItem {
   concepts?: string[];
   isRule?: boolean;
   isGlobal?: boolean;
+  isTimeline?: boolean;
 }
 
 interface ConceptNode {
@@ -58,50 +66,9 @@ function getActiveProfileId(): string {
   return localStorage.getItem("sentry_active_profile") || "default";
 }
 
-function isTrainerForActiveProfile(username: string): boolean {
-  if (!username) return false;
-  const pid = getActiveProfileId();
-  try {
-    const raw = localStorage.getItem(`sentry_ai_trainers_${pid}`);
-    const trainers: string[] = raw ? JSON.parse(raw) : [];
-    return trainers.some((t) => t.toLowerCase() === username.toLowerCase());
-  } catch {
-    return false;
-  }
-}
-
-/** Compress an image data URL to JPEG max 300x300 to fit localStorage. */
-async function compressImageDataUrl(dataUrl: string): Promise<string> {
-  return new Promise((resolve) => {
-    const img = new window.Image();
-    img.onload = () => {
-      const MAX = 300;
-      let w = img.naturalWidth;
-      let h = img.naturalHeight;
-      if (w > MAX || h > MAX) {
-        const ratio = Math.min(MAX / w, MAX / h);
-        w = Math.round(w * ratio);
-        h = Math.round(h * ratio);
-      }
-      const canvas = document.createElement("canvas");
-      canvas.width = w;
-      canvas.height = h;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) {
-        resolve(dataUrl);
-        return;
-      }
-      ctx.drawImage(img, 0, 0, w, h);
-      resolve(canvas.toDataURL("image/jpeg", 0.85));
-    };
-    img.onerror = () => resolve(dataUrl);
-    img.src = dataUrl;
-  });
-}
-
 function canTeachGlobalForProfile(username: string): boolean {
   if (!username) return false;
-  return isClass6(username) || isTrainerForActiveProfile(username);
+  return isClass6(username) || isClass5ForProfile(username);
 }
 
 interface SectionProps {
@@ -110,6 +77,7 @@ interface SectionProps {
   badge?: string;
   children: React.ReactNode;
   defaultOpen?: boolean;
+  icon?: React.ReactNode;
 }
 
 function CollapsibleSection({
@@ -118,6 +86,7 @@ function CollapsibleSection({
   badge,
   children,
   defaultOpen = false,
+  icon,
 }: SectionProps) {
   const [open, setOpen] = useState(defaultOpen);
   return (
@@ -133,6 +102,7 @@ function CollapsibleSection({
           ) : (
             <ChevronRight className="w-3 h-3 text-gold/60" />
           )}
+          {icon && <span className="text-gold/60">{icon}</span>}
           <span className="text-[10px] font-mono text-gold tracking-widest uppercase">
             {title}
           </span>
@@ -158,15 +128,9 @@ export default function MemoryExplorer({ onMemoryClick }: MemoryExplorerProps) {
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
   const avatarInputRef = useRef<HTMLInputElement>(null);
-  const queryClient = useQueryClient();
 
   const username = getCurrentUser() || "";
-  const [canTeachGlobal, setCanTeachGlobal] = useState(() =>
-    canTeachGlobalForProfile(username),
-  );
-
-  const [profileId, setProfileId] = useState<string>(getActiveProfileId);
-  const [refreshKey, setRefreshKey] = useState(0);
+  const canTeachGlobal = canTeachGlobalForProfile(username);
 
   const [activeProfileName, setActiveProfileName] = useState<string>(() => {
     const pid = getActiveProfileId();
@@ -182,42 +146,34 @@ export default function MemoryExplorer({ onMemoryClick }: MemoryExplorerProps) {
   useEffect(() => {
     const refresh = () => {
       const pid = getActiveProfileId();
-      setProfileId(pid);
       setActiveProfileName(
         localStorage.getItem(`sentry_ai_name_${pid}`) || "SENTRY",
       );
       setActiveProfileAvatar(
         localStorage.getItem(`sentry_ai_avatar_${pid}`) || null,
       );
-      setCanTeachGlobal(canTeachGlobalForProfile(username));
-      setRefreshKey((k) => k + 1);
-      queryClient.invalidateQueries();
     };
     window.addEventListener("sentry_profile_changed", refresh);
     window.addEventListener("sentry_ai_name_changed", refresh);
     window.addEventListener("sentry_ai_avatar_changed", refresh);
-    // Fallback polling every 3 seconds to catch any missed events
-    const pollId = setInterval(refresh, 3000);
     return () => {
       window.removeEventListener("sentry_profile_changed", refresh);
       window.removeEventListener("sentry_ai_name_changed", refresh);
       window.removeEventListener("sentry_ai_avatar_changed", refresh);
-      clearInterval(pollId);
     };
-  }, [username, queryClient]);
+  }, []);
 
   const { data: globalMemories = [] } = useGetMemories(true);
   const { data: userMemories = [] } = useGetUserMemories();
   const { data: rules = [] } = useGetRules();
+  const { data: timelineEntries = [] } = useGetTimeline();
   const { data: sentryAvatar } = useGetSentryAvatar();
   const deleteMemory = useDeleteMemory();
   const deleteRule = useDeleteRule();
-  const _setSentryAvatar = useSetSentryAvatar();
+  const deleteTimeline = useDeleteTimelineEntry();
+  const setSentryAvatar = useSetSentryAvatar();
   const updateMemory = useUpdateMemory();
-
-  // refreshKey forces re-render of all data sections on profile switch
-  void profileId;
-  void refreshKey;
+  const updateTimeline = useUpdateTimelineEntry();
 
   const allMemories: MemoryItem[] = [
     ...globalMemories.map((m) => ({
@@ -240,6 +196,17 @@ export default function MemoryExplorer({ onMemoryClick }: MemoryExplorerProps) {
       isGlobal: true,
     })),
   ];
+
+  // Timeline entries as MemoryItems for the History section
+  const timelineAsMemory: MemoryItem[] = timelineEntries.map((e) => ({
+    id: e.id,
+    text: e.event,
+    memoryType: "history",
+    timestamp: e.timestamp,
+    concepts: [],
+    isTimeline: true,
+    isGlobal: false,
+  }));
 
   // Build concept graph from memories
   const conceptMap = new Map<string, ConceptNode>();
@@ -305,9 +272,25 @@ export default function MemoryExplorer({ onMemoryClick }: MemoryExplorerProps) {
         m.memoryType !== "history",
     ),
   );
-  const historyItems = visible(
+  // History = timeline entries + any memory with type "history"
+  const memoryHistoryItems = visible(
     allMemories.filter((m) => m.memoryType === "history"),
   );
+  const timelineVisible = timelineAsMemory.filter(
+    (m) => !deletedIds.has(m.id.toString()) && matchText(m.text),
+  );
+  // Merge and deduplicate by id
+  const seenIds = new Set<string>();
+  const historyItems: MemoryItem[] = [];
+  for (const item of [...timelineVisible, ...memoryHistoryItems]) {
+    const key = item.id.toString();
+    if (!seenIds.has(key)) {
+      seenIds.add(key);
+      historyItems.push(item);
+    }
+  }
+  historyItems.sort((a, b) => Number(b.timestamp) - Number(a.timestamp));
+
   const ruleItems = visible(allMemories.filter((m) => m.isRule === true));
   const conceptItems = allConcepts.filter(
     (c) =>
@@ -319,7 +302,9 @@ export default function MemoryExplorer({ onMemoryClick }: MemoryExplorerProps) {
   const handleDelete = async (item: MemoryItem) => {
     setDeletedIds((prev) => new Set([...prev, item.id.toString()]));
     try {
-      if (item.isRule) {
+      if (item.isTimeline) {
+        await deleteTimeline.mutateAsync(item.id);
+      } else if (item.isRule) {
         await deleteRule.mutateAsync(item.id);
       } else {
         await deleteMemory.mutateAsync({
@@ -327,7 +312,7 @@ export default function MemoryExplorer({ onMemoryClick }: MemoryExplorerProps) {
           isGlobal: item.isGlobal,
         });
       }
-      toast.success("Memory deleted.");
+      toast.success("Deleted.");
     } catch {
       toast.error("Delete may not have synced to server, but hidden locally.");
     }
@@ -338,11 +323,18 @@ export default function MemoryExplorer({ onMemoryClick }: MemoryExplorerProps) {
     setEditText(text);
   };
 
-  const saveEdit = async (id: bigint) => {
+  const saveEdit = async (item: MemoryItem) => {
     if (!editText.trim()) return;
     try {
-      await updateMemory.mutateAsync({ id, text: editText.trim() });
-      toast.success("Memory updated.");
+      if (item.isTimeline) {
+        await updateTimeline.mutateAsync({
+          id: item.id,
+          event: editText.trim(),
+        });
+      } else {
+        await updateMemory.mutateAsync({ id: item.id, text: editText.trim() });
+      }
+      toast.success("Updated.");
       setEditingId(null);
     } catch {
       toast.error("Update failed.");
@@ -354,18 +346,17 @@ export default function MemoryExplorer({ onMemoryClick }: MemoryExplorerProps) {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = async (ev) => {
-      const raw = ev.target?.result as string;
-      const dataUrl = await compressImageDataUrl(raw);
+      const dataUrl = ev.target?.result as string;
       const pid = getActiveProfileId();
-      try {
-        localStorage.setItem(`sentry_ai_avatar_${pid}`, dataUrl);
-      } catch {
-        toast.error("Image too large to save. Please use a smaller image.");
-        return;
-      }
+      localStorage.setItem(`sentry_ai_avatar_${pid}`, dataUrl);
       setActiveProfileAvatar(dataUrl);
       window.dispatchEvent(new CustomEvent("sentry_ai_avatar_changed"));
-      toast.success("AI avatar updated.");
+      try {
+        await setSentryAvatar.mutateAsync(dataUrl);
+        toast.success("AI avatar updated.");
+      } catch {
+        toast.success("AI avatar saved locally.");
+      }
     };
     reader.readAsDataURL(file);
     e.target.value = "";
@@ -410,18 +401,24 @@ export default function MemoryExplorer({ onMemoryClick }: MemoryExplorerProps) {
         <div className="flex items-center gap-1 mb-0.5">
           <span
             className={`text-[9px] px-1.5 py-0.5 rounded font-mono capitalize ${
-              item.isRule
-                ? "badge-rule"
-                : item.memoryType === "history"
-                  ? "badge-history"
-                  : item.memoryType === "personal"
-                    ? "badge-personal"
-                    : item.memoryType === "prediction"
-                      ? "badge-prediction"
-                      : "badge-knowledge"
+              item.isTimeline
+                ? "badge-history"
+                : item.isRule
+                  ? "badge-rule"
+                  : item.memoryType === "history"
+                    ? "badge-history"
+                    : item.memoryType === "personal"
+                      ? "badge-personal"
+                      : item.memoryType === "prediction"
+                        ? "badge-prediction"
+                        : "badge-knowledge"
             }`}
           >
-            {item.isRule ? "rule" : item.memoryType}
+            {item.isTimeline
+              ? "timeline"
+              : item.isRule
+                ? "rule"
+                : item.memoryType}
           </span>
           <span className="text-[9px] text-muted-foreground/50 font-mono">
             {formatTs(item.timestamp)}
@@ -435,7 +432,7 @@ export default function MemoryExplorer({ onMemoryClick }: MemoryExplorerProps) {
               onChange={(e) => setEditText(e.target.value)}
               className="h-6 text-xs font-mono bg-input border-border flex-1"
               onKeyDown={(e) => {
-                if (e.key === "Enter") saveEdit(item.id);
+                if (e.key === "Enter") saveEdit(item);
                 if (e.key === "Escape") setEditingId(null);
               }}
               data-ocid="memory.input"
@@ -444,7 +441,7 @@ export default function MemoryExplorer({ onMemoryClick }: MemoryExplorerProps) {
               variant="ghost"
               size="icon"
               className="w-6 h-6 text-gold"
-              onClick={() => saveEdit(item.id)}
+              onClick={() => saveEdit(item)}
               data-ocid="memory.save_button"
             >
               <Check className="w-3 h-3" />
@@ -472,7 +469,7 @@ export default function MemoryExplorer({ onMemoryClick }: MemoryExplorerProps) {
 
       {editingId !== item.id && (
         <div className="flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 shrink-0">
-          {canEdit && !item.isRule && (
+          {canEdit && (
             <Button
               variant="ghost"
               size="icon"
@@ -499,10 +496,11 @@ export default function MemoryExplorer({ onMemoryClick }: MemoryExplorerProps) {
     </div>
   );
 
-  const totalCount = allMemories.length - deletedIds.size;
+  const totalCount =
+    allMemories.length + timelineEntries.length - deletedIds.size;
 
   return (
-    <div className="flex flex-col h-full" key={refreshKey}>
+    <div className="flex flex-col h-full">
       {/* AI Profile Header */}
       <div className="flex flex-col items-center py-3 px-3 border-b border-border shrink-0 gap-2">
         <button
@@ -719,18 +717,19 @@ export default function MemoryExplorer({ onMemoryClick }: MemoryExplorerProps) {
             )}
           </CollapsibleSection>
 
-          {/* History — Class 6 + trainers only */}
+          {/* History / Timeline — Class 6 + trainers only */}
           <CollapsibleSection
-            title="History"
+            title="History / Timeline"
             count={historyItems.length}
             badge={canTeachGlobal ? undefined : "View Only"}
+            icon={<Clock className="w-3 h-3" />}
           >
             {historyItems.length === 0 ? (
               <div
                 className="p-3 text-[10px] font-mono text-muted-foreground text-center"
                 data-ocid="memory.empty_state"
               >
-                No history recorded yet
+                No history recorded yet. Use HISTORY: in chat to add entries.
               </div>
             ) : (
               <div className="px-2 py-1 space-y-0.5">
@@ -747,7 +746,7 @@ export default function MemoryExplorer({ onMemoryClick }: MemoryExplorerProps) {
             )}
           </CollapsibleSection>
 
-          {/* Rules — Class 6 + trainers only */}
+          {/* Rules — Class 6 + trainers can edit/delete */}
           <CollapsibleSection
             title="Rules"
             count={ruleItems.length}
@@ -758,7 +757,7 @@ export default function MemoryExplorer({ onMemoryClick }: MemoryExplorerProps) {
                 className="p-3 text-[10px] font-mono text-muted-foreground text-center"
                 data-ocid="memory.empty_state"
               >
-                No rules defined yet
+                No rules defined yet. Use IF ... THEN ... in chat.
               </div>
             ) : (
               <div className="px-2 py-1 space-y-0.5">
@@ -766,7 +765,7 @@ export default function MemoryExplorer({ onMemoryClick }: MemoryExplorerProps) {
                   <MemoryRow
                     key={item.id.toString()}
                     item={item}
-                    canEdit={false}
+                    canEdit={canTeachGlobal}
                     canDelete={canTeachGlobal}
                     idx={idx}
                   />
@@ -775,7 +774,7 @@ export default function MemoryExplorer({ onMemoryClick }: MemoryExplorerProps) {
             )}
           </CollapsibleSection>
 
-          {/* Concepts — derived, view only (Class 6+ can delete associated memories) */}
+          {/* Concepts — derived, view only */}
           <CollapsibleSection
             title="Concepts"
             count={conceptItems.length}
@@ -858,7 +857,8 @@ export default function MemoryExplorer({ onMemoryClick }: MemoryExplorerProps) {
       <div className="px-3 py-2 border-t border-border shrink-0">
         <p className="text-[9px] font-mono text-muted-foreground">
           {totalCount} MEMORIES {" // "} {rules.length} RULES {" // "}{" "}
-          {allConcepts.length} CONCEPTS
+          {allConcepts.length} CONCEPTS {" // "} {timelineEntries.length}{" "}
+          TIMELINE
         </p>
         {!canTeachGlobal && (
           <p className="text-[9px] font-mono text-gold/30 mt-0.5">

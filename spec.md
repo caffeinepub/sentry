@@ -1,38 +1,53 @@
 # Sentry
 
 ## Current State
-Sentry is a full-stack AI chat/teaching platform with a three-panel layout (Memory Core, Chat, Brain Visualization). It has:
-- Memory Explorer with collapsible sections (Personal, User Knowledge, Global Knowledge, History, Rules, Concepts) with role-based edit/delete controls
-- Header showing active AI profile name and avatar, with all nav buttons including LogOut
-- ChatPanel showing AI profile name/avatar in messages
-- UserManagement panel where Class 6 (Unity/Syndelious) can upload login images for members
-- Access control: Class 6 and assigned trainers can edit global data; others can only edit personal data
-- Auto-save every 30s, localStorage persistence, IndexedDB for GIFs
+Memories (global/user), rules, and timeline/history are stored in:
+- Global memories & rules: ICP canister (shared across all AI profiles — no profile ID)
+- User memories: localStorage key `sentry_user_memories_${username}` (per-user, not per-profile)
+- Timeline: localStorage key `sentry_timeline_${username}` (per-user, not per-profile)
+
+This means all AI profiles (Sentry and all clones) share the same knowledge, rules, and history — switching profiles does not change what's shown in the Memory Core.
+
+Chat messages ARE already per-profile (keys: `sentry_chat_${user}_${profileId}`, `sentry_conv_${user}_${profileId}_${convId}`).
 
 ## Requested Changes (Diff)
 
 ### Add
-- Sign out button with visible text label "SIGN OUT" in the Header (currently icon-only and easy to miss)
-- Memory Core AI profile header must clearly show: profile picture, AI name (editable by Class 6/trainers), and labeled sections for all knowledge types
+- Profile-scoped storage functions in `localDB.ts`:
+  - `getProfileGlobalMemories(profileId)`, `addProfileGlobalMemory(...)`, `deleteProfileGlobalMemory(...)`, `updateProfileGlobalMemory(...)`
+  - `getProfileUserMemories(profileId, username)`, `addProfileUserMemory(...)`, `deleteProfileUserMemory(...)`, `updateProfileUserMemory(...)`
+  - `getProfileRules(profileId)`, `addProfileRule(...)`, `deleteProfileRule(...)`, `updateProfileRule(...)`
+  - `getProfileTimeline(profileId, username)`, `addProfileTimeline(...)`, `deleteProfileTimeline(...)`, `updateProfileTimeline(...)`
+  - `seedProfileFromDefault(newProfileId)` — copies default/Sentry profile's memories, rules, timeline to the new profile's keys as the initial knowledge base
+- Re-export a helper `getActiveProfileId()` from localDB.ts
+- In `CloneAIDialog.tsx`: when creating a new AI profile, call `seedProfileFromDefault(newProfileId)` so it starts with Sentry's current knowledge
 
 ### Modify
-- Header: Make the logout/sign-out button more visible — add text "SIGN OUT" next to the icon, or use a distinct gold-bordered style so it's clearly findable
-- Memory Core: Ensure the AI profile name and avatar at the top update correctly when switching profiles (listen to all three events: sentry_profile_changed, sentry_ai_name_changed, sentry_ai_avatar_changed)
-- Memory Core: Ensure Categories section header only shows edit controls to Class 6 and trainers; everyone can see categories
-- ChatPanel: Ensure AI profile name and avatar in message bubbles update immediately when profile is switched
-- GIF uploads: Fix blank GIF issue — store to IndexedDB immediately before adding the message, use IDB key reference in message, resolve IDB key to data URL on render
-- Chat history: Ensure Unity's chat history (and all users) persists after logout and page refresh via localStorage — save on every message add and on page unload
-- UserManagement: Ensure Class 6 (Unity/Syndelious) can upload login images for any member using the camera icon. Non-Class 6 users cannot upload for others. Login image is separate from chat profile pic.
-- Access control enforcement: Only Class 6 and assigned AI trainers for the active profile can edit/delete Categories, User Knowledge, Global Knowledge, History, Rules, Concepts. All users can edit/delete their own Personal memories.
+- `useQueries.ts`: Update ALL memory/rule/timeline hooks to use profile-scoped localStorage keys:
+  - `useGetMemories(isGlobal)` → read from `sentry_profile_global_${profileId}` if isGlobal, else `sentry_profile_user_${profileId}_${username}`
+  - `useGetUserMemories()` → read from `sentry_profile_user_${profileId}_${username}`
+  - `useGetRules()` → read from `sentry_profile_rules_${profileId}`
+  - `useGetTimeline()` → read from `sentry_profile_timeline_${profileId}_${username}`
+  - `useAddMemory`, `useDeleteMemory`, `useUpdateMemory`, `useAddRule`, `useDeleteRule`, `useAddTimelineEntry`, `useDeleteTimelineEntry`, `useUpdateTimelineEntry` → all write to profile-scoped keys and invalidate accordingly
+  - All query keys must include `profileId` so React Query refetches when profile changes
+  - For the default profile, migrate existing canister data on first load: read from canister once, seed into localStorage profile keys, then always use localStorage going forward
+- `MemoryExplorer.tsx`: 
+  - Add `activeProfileId` state that tracks `sentry_active_profile`
+  - When `sentry_profile_changed` fires, update `activeProfileId` state to force React Query to refetch with the new profile ID
+  - All sections (Personal, User Knowledge, Global Knowledge, History/Timeline, Rules, Concepts) must reload when profile changes
+- `ChatPanel.tsx`: When extracting concepts and adding memories/rules/timeline (the knowledge extraction on AI responses), use the profile-scoped hooks so knowledge is written to the active profile's store
 
 ### Remove
-- Nothing removed
+- Nothing removed — maintain backward compatibility for the default Sentry profile
 
 ## Implementation Plan
-1. **Header**: Add visible "SIGN OUT" text label to the logout button; ensure it's clearly distinguishable (gold border on hover or persistent label)
-2. **Memory Core**: Verify profile header (avatar + name) listens to all profile change events and re-reads localStorage on each event; ensure name/avatar update immediately on profile switch
-3. **Memory Core**: Ensure Categories button is visible to all but only Class 6/trainers see edit controls inside CategoryManager
-4. **ChatPanel**: Ensure AI avatar/name shown in sentry message bubbles updates when profile changes (listen to sentry_profile_changed, sentry_ai_name_changed, sentry_ai_avatar_changed events)
-5. **GIF Fix**: In the file upload handler, call `storeAttachment` and fully await it before calling `addMessage`. Use the IDB key in the attachment. In message rendering, resolve IDB keys to data URLs synchronously from a pre-loaded cache.
-6. **Chat persistence**: In `saveChatMessages`, ensure the per-user-per-profile key is used. On login, load chat for the correct user+profile combo. Add `beforeunload` save.
-7. **UserManagement**: Confirm login image upload button (camera icon) is visible for all members when the current user is Class 6. Display login image preview after upload.
+1. Add profile-scoped CRUD functions to `localDB.ts` for global memories, user memories, rules, and timeline. Storage keys:
+   - Global memories: `sentry_profile_global_${profileId}`
+   - User memories: `sentry_profile_user_${profileId}_${username}`
+   - Rules: `sentry_profile_rules_${profileId}`
+   - Timeline: `sentry_profile_timeline_${profileId}_${username}`
+   - Add `seedProfileFromDefault(newProfileId)` that copies all 4 categories from the `default` profile keys to the new profile keys
+2. Update `useQueries.ts` hooks: pass `profileId` in the query key; on mount/profile-change, for the `default` profile try seeding from canister if local key is empty (one-time migration); all reads/writes use localStorage profile keys exclusively after that
+3. Update `MemoryExplorer.tsx`: expose `activeProfileId` as a state variable, listen to `sentry_profile_changed`, pass it to all query hooks so they automatically refetch
+4. Update `CloneAIDialog.tsx`: after generating a new profile ID, call `seedProfileFromDefault(newId)` before saving the profile list
+5. Ensure `ChatPanel.tsx` concept/memory extraction uses the same profile-scoped hooks (they already call `useAddMemory`/`useAddRule`/`useAddTimelineEntry` which will now be profile-scoped after step 2)

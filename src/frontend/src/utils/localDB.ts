@@ -47,7 +47,7 @@ function loadBig<T>(key: string, def: T): T {
   }
 }
 
-function saveBig(key: string, value: unknown): void {
+export function saveBig(key: string, value: unknown): void {
   localStorage.setItem(key, serialize(value));
 }
 
@@ -141,6 +141,27 @@ export function addTimelineEntry(
   });
   saveBig(`sentry_timeline_${username}`, all);
   return id;
+}
+
+export function deleteTimelineEntry(username: string, id: bigint): void {
+  const all = loadBig<TimelineEntry[]>(`sentry_timeline_${username}`, []);
+  saveBig(
+    `sentry_timeline_${username}`,
+    all.filter((e) => e.id !== id),
+  );
+}
+
+export function updateTimelineEntry(
+  username: string,
+  id: bigint,
+  event: string,
+): void {
+  const all = loadBig<TimelineEntry[]>(`sentry_timeline_${username}`, []);
+  const idx = all.findIndex((e) => e.id === id);
+  if (idx !== -1) {
+    all[idx].event = event;
+    saveBig(`sentry_timeline_${username}`, all);
+  }
 }
 
 // ── AVATARS (per-user) ─────────────────────────────────────────────────────────
@@ -321,4 +342,244 @@ export function addLocalEmoji(emoji: string): LocalEmoji {
 export function removeLocalEmoji(id: string): void {
   const emojis = getLocalEmojis().filter((e) => e.id !== id);
   localStorage.setItem("sentry_local_emojis", JSON.stringify(emojis));
+}
+
+// ── PROFILE-SCOPED MEMORIES ───────────────────────────────────────────────────
+
+export function profileGlobalKey(profileId: string) {
+  return `sentry_profile_global_${profileId}`;
+}
+export function profileUserKey(profileId: string, username: string) {
+  return `sentry_profile_user_${profileId}_${username}`;
+}
+export function profileRulesKey(profileId: string) {
+  return `sentry_profile_rules_${profileId}`;
+}
+export function profileTimelineKey(profileId: string, username: string) {
+  return `sentry_profile_timeline_${profileId}_${username}`;
+}
+
+export function getProfileGlobalMemories(profileId: string): Memory[] {
+  return loadBig<Memory[]>(profileGlobalKey(profileId), []);
+}
+export function addProfileGlobalMemory(
+  profileId: string,
+  text: string,
+  memoryType: string,
+  concepts: string[],
+): bigint {
+  const all = loadBig<Memory[]>(profileGlobalKey(profileId), []);
+  const id = nextId();
+  all.push({
+    id,
+    isGlobal: true,
+    text,
+    concepts,
+    timestamp: BigInt(Date.now()) * 1_000_000n,
+    principalId: "",
+    memoryType,
+  });
+  saveBig(profileGlobalKey(profileId), all);
+  return id;
+}
+export function deleteProfileGlobalMemory(profileId: string, id: bigint): void {
+  const all = loadBig<Memory[]>(profileGlobalKey(profileId), []);
+  saveBig(
+    profileGlobalKey(profileId),
+    all.filter((m) => m.id !== id),
+  );
+}
+export function updateProfileGlobalMemory(
+  profileId: string,
+  id: bigint,
+  text: string,
+): void {
+  const all = loadBig<Memory[]>(profileGlobalKey(profileId), []);
+  const idx = all.findIndex((m) => m.id === id);
+  if (idx !== -1) {
+    all[idx].text = text;
+    saveBig(profileGlobalKey(profileId), all);
+  }
+}
+
+export function getProfileUserMemories(
+  profileId: string,
+  username: string,
+): Memory[] {
+  return loadBig<Memory[]>(profileUserKey(profileId, username), []);
+}
+export function addProfileUserMemory(
+  profileId: string,
+  username: string,
+  text: string,
+  memoryType: string,
+  concepts: string[],
+): bigint {
+  const all = loadBig<Memory[]>(profileUserKey(profileId, username), []);
+  const id = nextId();
+  all.push({
+    id,
+    isGlobal: false,
+    text,
+    concepts,
+    timestamp: BigInt(Date.now()) * 1_000_000n,
+    principalId: username,
+    memoryType,
+  });
+  saveBig(profileUserKey(profileId, username), all);
+  return id;
+}
+export function deleteProfileUserMemory(
+  profileId: string,
+  username: string,
+  id: bigint,
+): void {
+  const all = loadBig<Memory[]>(profileUserKey(profileId, username), []);
+  saveBig(
+    profileUserKey(profileId, username),
+    all.filter((m) => m.id !== id),
+  );
+}
+export function updateProfileUserMemory(
+  profileId: string,
+  username: string,
+  id: bigint,
+  text: string,
+): void {
+  const all = loadBig<Memory[]>(profileUserKey(profileId, username), []);
+  const idx = all.findIndex((m) => m.id === id);
+  if (idx !== -1) {
+    all[idx].text = text;
+    saveBig(profileUserKey(profileId, username), all);
+  }
+}
+
+export interface ProfileRule {
+  id: bigint;
+  condition: string;
+  effect: string;
+  timestamp: bigint;
+}
+export function getProfileRules(profileId: string): ProfileRule[] {
+  return loadBig<ProfileRule[]>(profileRulesKey(profileId), []);
+}
+export function addProfileRule(
+  profileId: string,
+  condition: string,
+  effect: string,
+): bigint {
+  const all = loadBig<ProfileRule[]>(profileRulesKey(profileId), []);
+  const id = nextId();
+  all.push({
+    id,
+    condition,
+    effect,
+    timestamp: BigInt(Date.now()) * 1_000_000n,
+  });
+  saveBig(profileRulesKey(profileId), all);
+  return id;
+}
+export function deleteProfileRule(profileId: string, id: bigint): void {
+  const all = loadBig<ProfileRule[]>(profileRulesKey(profileId), []);
+  saveBig(
+    profileRulesKey(profileId),
+    all.filter((r) => r.id !== id),
+  );
+}
+export function updateProfileRule(
+  profileId: string,
+  id: bigint,
+  condition: string,
+  effect: string,
+): void {
+  const all = loadBig<ProfileRule[]>(profileRulesKey(profileId), []);
+  const idx = all.findIndex((r) => r.id === id);
+  if (idx !== -1) {
+    all[idx].condition = condition;
+    all[idx].effect = effect;
+    saveBig(profileRulesKey(profileId), all);
+  }
+}
+
+export function getProfileTimeline(
+  profileId: string,
+  username: string,
+): TimelineEntry[] {
+  return loadBig<TimelineEntry[]>(profileTimelineKey(profileId, username), []);
+}
+export function addProfileTimelineEntry(
+  profileId: string,
+  username: string,
+  event: string,
+  personalitySnapshot: PersonalityProfile,
+): bigint {
+  const all = loadBig<TimelineEntry[]>(
+    profileTimelineKey(profileId, username),
+    [],
+  );
+  const id = nextId();
+  all.push({
+    id,
+    event,
+    personalitySnapshot,
+    timestamp: BigInt(Date.now()) * 1_000_000n,
+  });
+  saveBig(profileTimelineKey(profileId, username), all);
+  return id;
+}
+export function deleteProfileTimelineEntry(
+  profileId: string,
+  username: string,
+  id: bigint,
+): void {
+  const all = loadBig<TimelineEntry[]>(
+    profileTimelineKey(profileId, username),
+    [],
+  );
+  saveBig(
+    profileTimelineKey(profileId, username),
+    all.filter((e) => e.id !== id),
+  );
+}
+export function updateProfileTimelineEntry(
+  profileId: string,
+  username: string,
+  id: bigint,
+  event: string,
+): void {
+  const all = loadBig<TimelineEntry[]>(
+    profileTimelineKey(profileId, username),
+    [],
+  );
+  const idx = all.findIndex((e) => e.id === id);
+  if (idx !== -1) {
+    all[idx].event = event;
+    saveBig(profileTimelineKey(profileId, username), all);
+  }
+}
+
+/** Copy all knowledge from "default" profile to a new clone profile. */
+export function seedProfileFromDefault(
+  newProfileId: string,
+  username: string,
+): void {
+  // Copy global memories
+  const globalMems = getProfileGlobalMemories("default");
+  if (globalMems.length > 0)
+    saveBig(profileGlobalKey(newProfileId), globalMems);
+  // Copy user memories
+  const userMems = getProfileUserMemories("default", username);
+  if (userMems.length > 0)
+    saveBig(profileUserKey(newProfileId, username), userMems);
+  // Copy rules
+  const rules = getProfileRules("default");
+  if (rules.length > 0) saveBig(profileRulesKey(newProfileId), rules);
+  // Copy timeline
+  const timeline = getProfileTimeline("default", username);
+  if (timeline.length > 0)
+    saveBig(profileTimelineKey(newProfileId, username), timeline);
+}
+
+export function getActiveProfileId(): string {
+  return localStorage.getItem("sentry_active_profile") || "default";
 }

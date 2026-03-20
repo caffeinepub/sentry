@@ -27,6 +27,10 @@ export default function App() {
   const [rightOpen, setRightOpen] = useState(true);
   const [mobileMemoryOpen, setMobileMemoryOpen] = useState(false);
   const [mobileBrainOpen, setMobileBrainOpen] = useState(false);
+  // Track active profile so MemoryExplorer remounts on switch
+  const [activeProfileId, setActiveProfileId] = useState(
+    () => localStorage.getItem("sentry_active_profile") || "default",
+  );
 
   // Actor initializes in background — never block UI on this
   const { isFetching: actorInitializing } = useActor();
@@ -37,6 +41,17 @@ export default function App() {
     applyTheme(theme);
     const font = getSavedFont();
     if (font) applyFont(font);
+  }, []);
+
+  // Listen for profile changes to remount MemoryExplorer
+  useEffect(() => {
+    const handler = () => {
+      setActiveProfileId(
+        localStorage.getItem("sentry_active_profile") || "default",
+      );
+    };
+    window.addEventListener("sentry_profile_changed", handler);
+    return () => window.removeEventListener("sentry_profile_changed", handler);
   }, []);
 
   const currentYear = new Date().getFullYear();
@@ -83,6 +98,7 @@ export default function App() {
             </button>
           </div>
           <MemoryExplorer
+            key={activeProfileId}
             onMemoryClick={(text) => console.log("Focus:", text)}
           />
         </motion.div>
@@ -169,6 +185,7 @@ export default function App() {
             </span>
           </div>
           <MemoryExplorer
+            key={`mobile-${activeProfileId}`}
             onMemoryClick={(_text) => {
               setMobileMemoryOpen(false);
             }}

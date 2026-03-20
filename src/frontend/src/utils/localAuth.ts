@@ -9,10 +9,6 @@ interface Credential {
 const DEFAULT_CREDS: Credential[] = [
   { username: "Unity", password: "Bacon" },
   { username: "Syndelious", password: "Leviathan" },
-];
-
-// Additional users to seed on every install/upgrade
-const EXTRA_USERS: Credential[] = [
   { username: "Wolpdragos", password: "Cloud" },
   { username: "wolfi da furri", password: "Manic" },
 ];
@@ -20,30 +16,28 @@ const EXTRA_USERS: Credential[] = [
 export function getCredentials(): Credential[] {
   try {
     const raw = localStorage.getItem(AUTH_KEY);
-    let creds: Credential[];
     if (!raw) {
-      creds = [...DEFAULT_CREDS];
-    } else {
-      creds = JSON.parse(raw) as Credential[];
+      localStorage.setItem(AUTH_KEY, JSON.stringify(DEFAULT_CREDS));
+      return DEFAULT_CREDS;
     }
-    // Ensure extra users always exist (handles existing installs)
-    let modified = false;
-    for (const extra of EXTRA_USERS) {
+    const stored = JSON.parse(raw) as Credential[];
+    // Ensure default users always exist
+    const merged = [...stored];
+    for (const def of DEFAULT_CREDS) {
       if (
-        !creds.find(
-          (c) => c.username.toLowerCase() === extra.username.toLowerCase(),
+        !merged.find(
+          (c) => c.username.toLowerCase() === def.username.toLowerCase(),
         )
       ) {
-        creds.push(extra);
-        modified = true;
+        merged.push(def);
       }
     }
-    if (modified || !raw) {
-      localStorage.setItem(AUTH_KEY, JSON.stringify(creds));
+    if (merged.length !== stored.length) {
+      localStorage.setItem(AUTH_KEY, JSON.stringify(merged));
     }
-    return creds;
+    return merged;
   } catch {
-    return [...DEFAULT_CREDS, ...EXTRA_USERS];
+    return DEFAULT_CREDS;
   }
 }
 
@@ -82,6 +76,34 @@ export function isProtectedUser(username: string): boolean {
 export function isClass6(username: string): boolean {
   const l = username.toLowerCase();
   return l === "unity" || l === "syndelious";
+}
+
+/** Class 5 = members assigned as AI trainers for a specific AI profile.
+ *  They have equal teaching access as Class 6 for their assigned AI. */
+export function isClass5ForProfile(
+  username: string,
+  profileId?: string,
+): boolean {
+  if (!username) return false;
+  const pid =
+    profileId || localStorage.getItem("sentry_active_profile") || "default";
+  try {
+    const raw = localStorage.getItem(`sentry_ai_trainers_${pid}`);
+    const trainers: string[] = raw ? JSON.parse(raw) : [];
+    return trainers.some((t) => t.toLowerCase() === username.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
+/** Returns the class label for a user ("Class 6", "Class 5", or "Member") */
+export function getUserClassLabel(
+  username: string,
+  profileId?: string,
+): string {
+  if (isClass6(username)) return "Class 6";
+  if (isClass5ForProfile(username, profileId)) return "Class 5";
+  return "Member";
 }
 
 export function updateUser(

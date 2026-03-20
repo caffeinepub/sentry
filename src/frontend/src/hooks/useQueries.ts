@@ -1,36 +1,63 @@
 /**
  * useQueries — hybrid data layer.
  *
- * ICP canister (actor):  global memories, rules, knowledge edges, sentry avatar,
- *                        chat messages, custom GIFs, custom emojis
- * localStorage (localDB): user memories, personality, timeline, user avatar
+ * Profile-scoped localStorage: global memories, user memories, rules, timeline
+ * (keyed by active AI profile ID so each profile has independent knowledge)
+ * ICP canister (actor): knowledge edges, sentry avatar, custom GIFs, emojis
+ * localStorage (localDB): personality, user avatar
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   KnowledgeEdge,
   Memory,
   PersonalityProfile,
-  Rule,
   TimelineEntry,
   UserProfile,
 } from "../backend.d";
 import { getCurrentUser } from "../utils/localAuth";
+import type { ProfileRule } from "../utils/localDB";
 import {
+  addProfileGlobalMemory,
+  addProfileRule,
+  addProfileTimelineEntry,
+  addProfileUserMemory,
   addUserMemory,
   addTimelineEntry as dbAddTimeline,
+  deleteTimelineEntry as dbDeleteTimeline,
   getPersonality as dbGetPersonality,
   getTimeline as dbGetTimeline,
   getUserMemories as dbGetUserMemories,
   setUserAvatar as dbSetUserAvatar,
   updatePersonality as dbUpdatePersonality,
+  updateTimelineEntry as dbUpdateTimeline,
+  deleteProfileGlobalMemory,
+  deleteProfileRule,
+  deleteProfileTimelineEntry,
+  deleteProfileUserMemory,
   deleteUserMemory,
+  getActiveProfileId,
+  getProfileGlobalMemories,
+  getProfileRules,
+  getProfileTimeline,
+  getProfileUserMemories,
   getUserAvatar,
+  profileGlobalKey,
+  profileRulesKey,
+  saveBig,
+  updateProfileGlobalMemory,
+  updateProfileRule,
+  updateProfileTimelineEntry,
+  updateProfileUserMemory,
   updateUserMemory,
 } from "../utils/localDB";
 import { useActor } from "./useActor";
 
 function user(): string {
   return getCurrentUser() || "guest";
+}
+
+function profileId(): string {
+  return getActiveProfileId();
 }
 
 // ── Canister message types (not in backend.d.ts yet) ─────────────────────────
@@ -62,44 +89,106 @@ export function useGetCurrentUser() {
   });
 }
 
-// ── ICP: Global memories ───────────────────────────────────────────────────────
+// ── Profile-scoped: Global memories ───────────────────────────────────────────
 
 export function useGetMemories(isGlobal: boolean) {
-  const { actor, isFetching } = useActor();
+  const { actor } = useActor();
+  const pid = profileId();
+  const username = user();
   return useQuery<Memory[]>({
-    queryKey: ["memories", isGlobal],
+    queryKey: ["profile_memories", pid, isGlobal, username],
     queryFn: async () => {
-      if (!actor) return [];
-      return actor.getMemories(isGlobal);
+      if (isGlobal) {
+        // Seed default profile from canister on first load if empty
+        if (pid === "default") {
+          const existing = getProfileGlobalMemories("default");
+          if (existing.length === 0 && actor) {
+            try {
+              const canisterMems = await actor.getMemories(true);
+              if (canisterMems.length > 0) {
+                saveBig(profileGlobalKey("default"), canisterMems);
+                return canisterMems;
+              }
+            } catch {
+              // silent fallback
+            }
+          }
+          return getProfileGlobalMemories("default");
+        }
+        return getProfileGlobalMemories(pid);
+      }
+      // User memories
+      return getProfileUserMemories(pid, username);
     },
-    enabled: !!actor && !isFetching,
-    refetchInterval: 3000,
+    staleTime: 0,
+    refetchOnWindowFocus: true,
   });
 }
 
-// ── localStorage: User memories ────────────────────────────────────────────────
+// ── Profile-scoped: User memories ─────────────────────────────────────────────
 
 export function useGetUserMemories() {
+  const pid = profileId();
+  const username = user();
   return useQuery<Memory[]>({
-    queryKey: ["userMemories", user()],
-    queryFn: () => dbGetUserMemories(user()),
+    queryKey: ["profile_user_memories", pid, username],
+    queryFn: () => {
+      const mems = getProfileUserMemories(pid, username);
+      // Seed default from legacy key if empty
+      if (mems.length === 0 && pid === "default") {
+        return dbGetUserMemories(username);
+      }
+      return mems;
+    },
+    staleTime: 0,
   });
 }
 
-// ── ICP: Rules ─────────────────────────────────────────────────────────────────
+// ── Profile-scoped: Rules ─────────────────────────────────────────────────────
 
 export function useGetRules() {
-  const { actor, isFetching } = useActor();
-  return useQuery<Rule[]>({
-    queryKey: ["rules"],
+  const { actor } = useActor();
+  const pid = profileId();
+  return useQuery<ProfileRule[]>({
+    queryKey: ["profile_rules", pid],
     queryFn: async () => {
-      if (!actor) return [];
-      return actor.getRules();
+      if (pid === "default") {
+        const existing = getProfileRules("default");
+        if (existing.length === 0 && actor) {
+          try {
+            const canisterRules = await actor.getRules();
+            if (canisterRules.length > 0) {
+              // Map Rule to ProfileRule shape
+              const mapped: ProfileRule[] = canisterRules.map(
+                (r: {
+                  id: bigint;
+                  condition: string;
+                  effect: string;
+                  timestamp?: bigint;
+                }) => ({
+                  id: r.id,
+                  condition: r.condition,
+                  effect: r.effect,
+                  timestamp: r.timestamp ?? BigInt(Date.now()) * 1_000_000n,
+                }),
+              );
+              saveBig(profileRulesKey("default"), mapped);
+              return mapped;
+            }
+          } catch {
+            // silent fallback
+          }
+        }
+        return getProfileRules("default");
+      }
+      return getProfileRules(pid);
     },
-    enabled: !!actor && !isFetching,
-    refetchInterval: 3000,
+    staleTime: 0,
+    refetchOnWindowFocus: true,
   });
 }
+
+export type { ProfileRule } from "../utils/localDB";
 
 // ── localStorage: Personality ──────────────────────────────────────────────────
 
@@ -110,12 +199,22 @@ export function useGetPersonality() {
   });
 }
 
-// ── localStorage: Timeline ─────────────────────────────────────────────────────
+// ── Profile-scoped: Timeline ──────────────────────────────────────────────────
 
 export function useGetTimeline() {
+  const pid = profileId();
+  const username = user();
   return useQuery<TimelineEntry[]>({
-    queryKey: ["timeline", user()],
-    queryFn: () => dbGetTimeline(user()),
+    queryKey: ["profile_timeline", pid, username],
+    queryFn: () => {
+      const tl = getProfileTimeline(pid, username);
+      // Seed default from legacy key if empty
+      if (tl.length === 0 && pid === "default") {
+        return dbGetTimeline(username);
+      }
+      return tl;
+    },
+    staleTime: 0,
   });
 }
 
@@ -137,11 +236,14 @@ export function useGetKnowledgeEdges() {
 
 export function useGetSentryAvatar() {
   const { actor, isFetching } = useActor();
-  const pid = localStorage.getItem("sentry_active_profile") || "default";
+  const activeAIName = localStorage.getItem("sentry_active_ai") || "default";
   return useQuery<string>({
-    queryKey: ["sentryAvatar", pid],
+    queryKey: ["sentryAvatar", activeAIName],
     queryFn: async () => {
-      const localKey = `sentry_ai_avatar_${pid}`;
+      const localKey =
+        activeAIName !== "default"
+          ? `sentry_avatar_${activeAIName}`
+          : "sentry_avatar_v2";
       if (!actor)
         return (
           localStorage.getItem(localKey) ||
@@ -190,9 +292,8 @@ export function useGetCallerUserProfile() {
 
 // ── MUTATIONS ─────────────────────────────────────────────────────────────────
 
-/** Add memory: global → ICP actor; user → localStorage */
+/** Add memory: global → profile-scoped localStorage; user → profile-scoped localStorage */
 export function useAddMemory() {
-  const { actor } = useActor();
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (params: {
@@ -201,101 +302,207 @@ export function useAddMemory() {
       concepts: string[];
       isGlobal: boolean;
     }) => {
+      const pid = profileId();
+      const username = user();
       if (params.isGlobal) {
-        if (!actor) throw new Error("Actor not ready");
-        return actor.addMemory(
+        return addProfileGlobalMemory(
+          pid,
           params.text,
           params.memoryType,
           params.concepts,
-          true,
         );
       }
-      return addUserMemory(
-        user(),
+      return addProfileUserMemory(
+        pid,
+        username,
         params.text,
         params.memoryType,
         params.concepts,
       );
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["memories"] });
-      qc.invalidateQueries({ queryKey: ["userMemories"] });
+      const pid = profileId();
+      const username = user();
+      qc.invalidateQueries({
+        queryKey: ["profile_memories", pid, true, username],
+      });
+      qc.invalidateQueries({
+        queryKey: ["profile_memories", pid, false, username],
+      });
+      qc.invalidateQueries({
+        queryKey: ["profile_user_memories", pid, username],
+      });
     },
   });
 }
 
-/** Delete memory: global → ICP actor; user memory → localStorage */
+/** Delete memory: profile-scoped localStorage */
 export function useDeleteMemory() {
-  const { actor } = useActor();
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (params: { id: bigint; isGlobal?: boolean }) => {
-      if (params.isGlobal !== false && actor) {
-        // Try actor first for global memories
-        try {
-          return await actor.deleteMemory(params.id);
-        } catch {
-          // Fall through to localStorage
-        }
+      const pid = profileId();
+      const username = user();
+      if (params.isGlobal !== false) {
+        deleteProfileGlobalMemory(pid, params.id);
+      } else {
+        deleteProfileUserMemory(pid, username, params.id);
+        // Also try legacy user memory
+        deleteUserMemory(username, params.id);
       }
-      deleteUserMemory(user(), params.id);
       return true;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["memories"] });
-      qc.invalidateQueries({ queryKey: ["userMemories"] });
+      const pid = profileId();
+      const username = user();
+      qc.invalidateQueries({
+        queryKey: ["profile_memories", pid],
+      });
+      qc.invalidateQueries({
+        queryKey: ["profile_user_memories", pid, username],
+      });
     },
   });
 }
 
-/** Update memory text — only user memories (localStorage) can be edited */
+/** Update memory text — profile-scoped */
 export function useUpdateMemory() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (params: { id: bigint; text: string }) => {
-      updateUserMemory(user(), params.id, params.text);
+    mutationFn: async (params: {
+      id: bigint;
+      text: string;
+      isGlobal?: boolean;
+    }) => {
+      const pid = profileId();
+      const username = user();
+      if (params.isGlobal) {
+        updateProfileGlobalMemory(pid, params.id, params.text);
+      } else {
+        updateProfileUserMemory(pid, username, params.id, params.text);
+        updateUserMemory(username, params.id, params.text);
+      }
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["userMemories"] });
+      const pid = profileId();
+      const username = user();
+      qc.invalidateQueries({ queryKey: ["profile_memories", pid] });
+      qc.invalidateQueries({
+        queryKey: ["profile_user_memories", pid, username],
+      });
     },
   });
 }
 
-/** Add rule → ICP actor */
+/** Add rule → profile-scoped localStorage */
 export function useAddRule() {
-  const { actor } = useActor();
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (params: { condition: string; effect: string }) => {
-      if (!actor) throw new Error("Actor not ready");
-      return actor.addRule(params.condition, params.effect);
+      const pid = profileId();
+      return addProfileRule(pid, params.condition, params.effect);
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["rules"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["profile_rules", profileId()] });
+    },
   });
 }
 
-/** Delete rule → ICP actor */
+/** Delete rule → profile-scoped localStorage */
 export function useDeleteRule() {
-  const { actor } = useActor();
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: bigint) => {
-      if (!actor) throw new Error("Actor not ready");
-      return actor.deleteRule(id);
+      deleteProfileRule(profileId(), id);
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["rules"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["profile_rules", profileId()] });
+    },
   });
 }
 
-/** Add timeline entry → localStorage per user */
+/** Update rule → profile-scoped localStorage */
+export function useUpdateRule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (params: {
+      id: bigint;
+      condition: string;
+      effect: string;
+    }) => {
+      updateProfileRule(
+        profileId(),
+        params.id,
+        params.condition,
+        params.effect,
+      );
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["profile_rules", profileId()] });
+    },
+  });
+}
+
+/** Add timeline entry → profile-scoped localStorage */
 export function useAddTimelineEntry() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (params: {
       event: string;
       personalitySnapshot: PersonalityProfile;
-    }) => dbAddTimeline(user(), params.event, params.personalitySnapshot),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["timeline"] }),
+    }) => {
+      const pid = profileId();
+      const username = user();
+      // Also add to legacy per-user timeline so Timeline panel works
+      dbAddTimeline(username, params.event, params.personalitySnapshot);
+      return addProfileTimelineEntry(
+        pid,
+        username,
+        params.event,
+        params.personalitySnapshot,
+      );
+    },
+    onSuccess: () => {
+      const pid = profileId();
+      qc.invalidateQueries({ queryKey: ["profile_timeline", pid] });
+      qc.invalidateQueries({ queryKey: ["timeline"] });
+    },
+  });
+}
+
+/** Delete timeline entry → profile-scoped localStorage */
+export function useDeleteTimelineEntry() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: bigint) => {
+      const pid = profileId();
+      const username = user();
+      deleteProfileTimelineEntry(pid, username, id);
+      dbDeleteTimeline(username, id);
+    },
+    onSuccess: () => {
+      const pid = profileId();
+      qc.invalidateQueries({ queryKey: ["profile_timeline", pid] });
+      qc.invalidateQueries({ queryKey: ["timeline"] });
+    },
+  });
+}
+
+/** Update timeline entry → profile-scoped localStorage */
+export function useUpdateTimelineEntry() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (params: { id: bigint; event: string }) => {
+      const pid = profileId();
+      const username = user();
+      updateProfileTimelineEntry(pid, username, params.id, params.event);
+      dbUpdateTimeline(username, params.id, params.event);
+    },
+    onSuccess: () => {
+      const pid = profileId();
+      qc.invalidateQueries({ queryKey: ["profile_timeline", pid] });
+      qc.invalidateQueries({ queryKey: ["timeline"] });
+    },
   });
 }
 
@@ -323,8 +530,12 @@ export function useSetSentryAvatar() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (url: string) => {
-      const pid = localStorage.getItem("sentry_active_profile") || "default";
-      const localKey = `sentry_ai_avatar_${pid}`;
+      const activeAIName =
+        localStorage.getItem("sentry_active_ai") || "default";
+      const localKey =
+        activeAIName !== "default"
+          ? `sentry_avatar_${activeAIName}`
+          : "sentry_avatar_v2";
       localStorage.setItem(localKey, url);
       if (!actor) return;
       try {

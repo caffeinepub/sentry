@@ -7,10 +7,11 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Check, Copy, Trash2, X } from "lucide-react";
+import { Check, Copy, Cpu, Trash2, X } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { getCurrentUser, isClass6 } from "../utils/localAuth";
+import { seedProfileFromDefault } from "../utils/localDB";
 
 interface AIProfile {
   id: string;
@@ -82,20 +83,19 @@ export default function CloneAIDialog({ open, onClose }: CloneAIDialogProps) {
   };
 
   const handleActivate = (profileId: string) => {
-    setActiveProfileId(profileId);
-    setActiveProfileIdState(profileId);
-    // Restore this profile's global memories into the active key
-    const profile = profiles.find((p) => p.id === profileId);
-    if (profile) {
-      const profileName =
-        localStorage.getItem(`sentry_ai_name_${profileId}`) || profile.name;
-      localStorage.setItem(`sentry_ai_name_${profileId}`, profileName);
-      // Restore global memories from the profile snapshot
-      if (profile.globalMemories) {
-        localStorage.setItem(
-          "sentry_global_memories",
-          JSON.stringify(profile.globalMemories),
+    const isDefault = profileId === "default";
+    setActiveProfileId(isDefault ? null : profileId);
+    setActiveProfileIdState(isDefault ? null : profileId);
+    // Ensure the name key exists for this profile — NO memory restoration (profiles are fully isolated)
+    if (!isDefault) {
+      const profile = profiles.find((p) => p.id === profileId);
+      if (profile) {
+        const existingName = localStorage.getItem(
+          `sentry_ai_name_${profileId}`,
         );
+        if (!existingName) {
+          localStorage.setItem(`sentry_ai_name_${profileId}`, profile.name);
+        }
       }
     }
     // Notify same-tab listeners (storage event only fires for other tabs)
@@ -106,6 +106,10 @@ export default function CloneAIDialog({ open, onClose }: CloneAIDialogProps) {
   };
 
   const handleDelete = (profileId: string) => {
+    if (profileId === "default") {
+      toast.error("Sentry is a permanent non-deletable default profile.");
+      return;
+    }
     if (!userIsClass6) {
       toast.error("Only Class 6 members can delete AI profiles.");
       return;
@@ -134,24 +138,9 @@ export default function CloneAIDialog({ open, onClose }: CloneAIDialogProps) {
     setCloning(true);
     try {
       const username = getCurrentUser() || "Unity";
+      const newProfileId = `profile_${Date.now()}`;
 
-      // Gather memories from localStorage
-      const memoriesRaw = localStorage.getItem(
-        `sentry_user_memories_${username}`,
-      );
-      const memories = memoriesRaw ? JSON.parse(memoriesRaw) : [];
-
-      // Gather global memories
-      const globalMemoriesRaw = localStorage.getItem("sentry_global_memories");
-      const globalMemories = globalMemoriesRaw
-        ? JSON.parse(globalMemoriesRaw)
-        : [];
-
-      // Gather rules (global)
-      const rulesRaw = localStorage.getItem("sentry_global_rules");
-      const rules = rulesRaw ? JSON.parse(rulesRaw) : [];
-
-      // Gather categories
+      // Gather categories (shared structural data)
       const catsRaw = localStorage.getItem("sentry_categories");
       const categories = catsRaw ? JSON.parse(catsRaw) : [];
 
@@ -162,12 +151,12 @@ export default function CloneAIDialog({ open, onClose }: CloneAIDialogProps) {
       const personality = personalityRaw ? JSON.parse(personalityRaw) : {};
 
       const profile: AIProfile = {
-        id: `profile_${Date.now()}`,
+        id: newProfileId,
         name: newName.trim(),
         createdAt: Date.now(),
-        memories,
-        globalMemories,
-        rules,
+        memories: [],
+        globalMemories: [],
+        rules: [],
         categories,
         personality,
         // NOT copied: chat history, avatar, theme, font
@@ -176,6 +165,9 @@ export default function CloneAIDialog({ open, onClose }: CloneAIDialogProps) {
       const existing = loadProfiles();
       existing.push(profile);
       saveProfiles(existing);
+
+      // Seed the new profile's knowledge from the default (Sentry) profile
+      seedProfileFromDefault(newProfileId, username);
 
       toast.success(`AI profile "${newName.trim()}" created.`);
       setNewName("");
@@ -237,6 +229,37 @@ export default function CloneAIDialog({ open, onClose }: CloneAIDialogProps) {
             </p>
           ) : (
             <div className="space-y-1.5 max-h-52 overflow-y-auto">
+              {/* Sentry default — always present, non-deletable */}
+              <div className="group relative flex items-center gap-3 p-2 rounded transition-colors bg-gold/10 border border-gold/30">
+                <div className="w-8 h-8 rounded-full bg-black border border-gold/40 flex items-center justify-center shrink-0">
+                  <Cpu className="w-4 h-4 text-gold" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs font-mono text-gold truncate">
+                      SENTRY
+                    </span>
+                    <span className="text-[9px] font-mono px-1 py-0.5 rounded bg-gold/10 text-gold/60 border border-gold/20">
+                      DEFAULT
+                    </span>
+                    {(!activeProfileId || activeProfileId === "default") && (
+                      <span className="text-[9px] font-mono px-1 py-0.5 rounded bg-gold/20 text-gold border border-gold/30">
+                        ACTIVE
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-[9px] font-mono text-gold/40">
+                    NON-DELETABLE
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  className="shrink-0 text-[10px] font-mono px-2 py-1 rounded border border-gold/30 text-gold hover:bg-gold/10 bg-black"
+                  onClick={() => handleActivate("default")}
+                >
+                  ACTIVATE
+                </button>
+              </div>
               {profiles.map((profile, idx) => {
                 const isActive = profile.id === activeProfileId;
                 return (
@@ -307,6 +330,11 @@ export default function CloneAIDialog({ open, onClose }: CloneAIDialogProps) {
                                 );
                                 saveProfiles(updated);
                                 setProfiles(updated);
+                                window.dispatchEvent(
+                                  new CustomEvent("sentry_ai_name_changed", {
+                                    detail: { profileId: profile.id },
+                                  }),
+                                );
                                 toast.success("AI renamed.");
                               }
                             }}
@@ -328,6 +356,14 @@ export default function CloneAIDialog({ open, onClose }: CloneAIDialogProps) {
                                   localStorage.setItem(
                                     `sentry_ai_avatar_${profile.id}`,
                                     url,
+                                  );
+                                  window.dispatchEvent(
+                                    new CustomEvent(
+                                      "sentry_ai_avatar_changed",
+                                      {
+                                        detail: { profileId: profile.id },
+                                      },
+                                    ),
                                   );
                                   toast.success("AI avatar updated.");
                                 };
@@ -371,8 +407,9 @@ export default function CloneAIDialog({ open, onClose }: CloneAIDialogProps) {
               CREATE NEW CLONE
             </p>
             <p className="text-xs text-muted-foreground font-mono leading-relaxed">
-              Copies memories, rules, categories, and global knowledge — not
-              chat history, name, theme, or avatar.
+              Copies Sentry&apos;s current knowledge, rules, categories — not
+              chat history, name, theme, or avatar. Each clone learns
+              independently after creation.
             </p>
 
             <div className="space-y-2">

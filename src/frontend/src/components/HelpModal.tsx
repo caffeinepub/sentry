@@ -19,10 +19,22 @@ const SECTIONS = [
     color: "badge-knowledge",
   },
   {
+    title: "ACCESS LEVELS",
+    content:
+      "CLASS 6 (Unity, Syndelious): Full access — create/delete AIs, manage members, assign trainers, teach globally.\n\nCLASS 5 (AI Trainers): Members assigned by Class 6 to a specific AI profile. They can teach that AI globally using all keyword commands (TEACH:, IF...THEN..., HISTORY:, REMEMBER:). They cannot create/delete AIs or manage members.\n\nMEMBERS: Can use all AI profiles and teach personal info only. Cannot update AI names or profile photos.",
+    color: "badge-rule",
+  },
+  {
     title: "PROFILES & CUSTOMIZATION",
     content:
-      "Changing your profile pic: Click your avatar next to any of your messages in chat to upload a new one.\n\nChanging the AI's profile pic: Click the AI's avatar next to any Sentry message. Note: Only Class 6 members (Unity, Syndelious) can change the AI's photo.\n\nChanging your display name: Hover over your name in a chat message and click the pencil icon (✎).\n\nChanging the AI's name: Hover over the AI's name in a message and click the pencil icon. Only Class 6 (Unity, Syndelious) can change the AI's name.\n\nCreating new AIs: Only Class 6 (Unity or Syndelious) can create or delete AI templates. All members can use existing AI templates.\n\nAll other settings and info are in the gear icon (⚙) or stored in chat history.",
+      "Changing your profile pic: Click your avatar next to any of your messages in chat to upload a new one.\n\nChanging the AI's profile pic: Click the AI's avatar next to any Sentry message. Note: Only Class 5 and Class 6 members can change the AI's photo for their assigned AI.\n\nChanging your display name: Hover over your name in a chat message and click the pencil icon (✎).\n\nChanging the AI's name: Hover over the AI's name in a message and click the pencil icon. Only Class 5/6 can change the AI's name.\n\nCreating new AIs: Only Class 6 (Unity or Syndelious) can create or delete AI templates.\n\nAll other settings and info are in the gear icon (⚙) or stored in chat history.",
     color: "badge-personal",
+  },
+  {
+    title: "HOW TO ADD KNOWLEDGE MANUALLY",
+    content:
+      "You can add information directly in normal conversation using these commands:\n\nUser Knowledge (facts about yourself):\n  REMEMBER: I prefer dark themes\n  REMEMBER: My name is Unity\n  (Use REMEMBER: for personal facts about yourself)\n\nGlobal Knowledge (facts the AI should know):\n  TEACH: The sky is blue because of light scattering\n  TEACH: Hypnosis works by focusing attention\n  (Use TEACH: for general world knowledge — Class 5/6 only)\n\nHistory / Timeline entries:\n  HISTORY: Today we discussed light and color\n  HISTORY: Unity first joined on March 2026\n  (Use HISTORY: to log events — Class 5/6 only)\n\nRules (cause-effect logic):\n  IF fire touches wood THEN it burns\n  IF someone is tired THEN they need rest\n  (Use IF...THEN... for rules — Class 5/6 only)\n\nAll entries appear in the Memory Core panel immediately after sending.",
+    color: "badge-knowledge",
   },
   {
     title: "HOW RULES WORK",
@@ -33,7 +45,7 @@ const SECTIONS = [
   {
     title: "Knowledge Categories",
     content:
-      "You can organize what Sentry learns by category. Categories include: Grammar, Powers, Occult, Zener Cards, Hypnosis, Math, Coding, and many more — you can add/edit/delete your own.\n\nTo teach Sentry within a category, just mention it naturally: \"In hypnosis, the subject enters a trance state\" or use TEACH: prefix.\n\nSentry learns how categories relate to each other. If you teach something about 'hypnosis' and something about 'psychological engineering', Sentry tracks that these domains overlap.",
+      "You can organize what Sentry learns by category. Categories include: Grammar, Powers, Occult, Zener Cards, Hypnosis, Math, Coding, and many more — you can add/edit/delete your own (Class 5+ only).\n\nTo teach Sentry within a category, just mention it naturally: \"In hypnosis, the subject enters a trance state\" or use TEACH: prefix.\n\nClick any category in the Categories panel to see all connected messages and edit or delete them.\n\nSentry learns how categories relate to each other. If you teach something about 'hypnosis' and something about 'psychological engineering', Sentry tracks that these domains overlap.",
     color: "badge-knowledge",
   },
   {
@@ -57,25 +69,25 @@ const SECTIONS = [
   {
     title: "TEACH: command",
     content:
-      "Teach Sentry general knowledge that becomes part of the global knowledge base.\n\nExample: TEACH: The speed of light is approximately 299,792 km/s",
+      "Available to: Class 5 and Class 6 (for global knowledge). Any member (for personal knowledge).\n\nTeach Sentry general knowledge that becomes part of the global knowledge base.\n\nExample: TEACH: The speed of light is approximately 299,792 km/s",
     color: "badge-knowledge",
   },
   {
     title: "IF...THEN... rules",
     content:
-      "Teach cause-and-effect rules. Sentry can chain these for multi-step reasoning.\n\nExample: IF it rains THEN the ground gets wet",
+      "Available to: Class 5 and Class 6 (for global rules). Any member (stores to personal memory).\n\nTeach cause-and-effect rules. Sentry can chain these for multi-step reasoning.\n\nExample: IF it rains THEN the ground gets wet",
     color: "badge-rule",
   },
   {
     title: "HISTORY: command",
     content:
-      "Record events in Sentry's timeline. These appear in the Timeline panel.\n\nExample: HISTORY: Today we discussed quantum mechanics",
+      "Available to: Class 5 and Class 6.\n\nRecord events in Sentry's timeline. These appear in the Timeline panel.\n\nExample: HISTORY: Today we discussed quantum mechanics",
     color: "badge-history",
   },
   {
     title: "REMEMBER: command",
     content:
-      "Store a personal memory associated with your profile.\n\nExample: REMEMBER: My favorite language is TypeScript",
+      "Available to: All members.\n\nStore a personal memory associated with your profile.\n\nExample: REMEMBER: My favorite language is TypeScript",
     color: "badge-personal",
   },
   {
@@ -129,7 +141,7 @@ const SECTIONS = [
   {
     title: "IMPORTANT DISCLAIMER",
     content:
-      "AI has unlimited potential. So AI trainers have equal access with class 6 for teaching their AI profile. However. Only class 6 may delete their ai. Which will only ever be for safety reasons. If they'd like to try taking their ai elsewhere. There's a way to import/export its knowledge.",
+      "AI has unlimited potential. So AI trainers (Class 5) have equal access with Class 6 for teaching their AI profile. However. Only Class 6 may delete their AI. Which will only ever be for safety reasons. If they'd like to try taking their AI elsewhere. There's a way to import/export its knowledge.",
     color: "badge-rule",
   },
 ];

@@ -17,7 +17,7 @@ import {
   X,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   useAddChatMessage,
@@ -29,7 +29,6 @@ import {
   useClearChatMessages,
   useDeleteCustomEmoji,
   useDeleteCustomGif,
-  useGetChatMessages,
   useGetCurrentUser,
   useGetCustomEmojis,
   useGetCustomGifs,
@@ -61,7 +60,11 @@ import {
   loadAttachment,
   storeAttachment,
 } from "../utils/attachmentStore";
-import { getCurrentUser, isClass6 } from "../utils/localAuth";
+import {
+  getCurrentUser,
+  isClass5ForProfile,
+  isClass6,
+} from "../utils/localAuth";
 import {
   type LocalEmoji,
   type LocalGif,
@@ -211,16 +214,51 @@ function setActiveConvId(username: string, convId: string): void {
   localStorage.setItem(getActiveConvKey(username), convId);
 }
 
+const ATTACH_KEY_PREFIX = "sentry_attach_";
+
+function saveAttachmentData(msgId: string, idx: number, dataUrl: string): void {
+  try {
+    localStorage.setItem(`${ATTACH_KEY_PREFIX}${msgId}_${idx}`, dataUrl);
+  } catch {
+    /* quota - attachment won't persist */
+  }
+}
+
+function loadAttachmentData(msgId: string, idx: number): string {
+  return localStorage.getItem(`${ATTACH_KEY_PREFIX}${msgId}_${idx}`) || "";
+}
+
 function loadConvMessages(username: string, convId: string): ChatMessage[] {
   try {
     const key = getConvMsgKey(username, convId);
     const raw = localStorage.getItem(key);
     if (!raw) return [];
-    return JSON.parse(raw, (_k, v) => {
+    const msgs: ChatMessage[] = JSON.parse(raw, (_k, v) => {
       if (typeof v === "string" && v.startsWith("__bigint__"))
         return BigInt(v.slice(10));
       return v;
     });
+    // Resolve sentinel URLs and migrate legacy full data: URLs
+    for (const msg of msgs) {
+      if (!msg.attachments) continue;
+      for (let i = 0; i < msg.attachments.length; i++) {
+        const att = msg.attachments[i];
+        if (att.url?.startsWith("local:")) {
+          const ref = att.url.slice(6);
+          const parts = ref.split("_");
+          const idx = Number.parseInt(parts[parts.length - 1], 10);
+          const msgIdPart = parts.slice(0, -1).join("_");
+          att.url = loadAttachmentData(msgIdPart, idx);
+        } else if (att.url?.startsWith("data:")) {
+          // Migrate: save separately and replace with sentinel
+          saveAttachmentData(msg.id, i, att.url);
+          att.url = `local:${msg.id}_${i}`;
+          // Resolve immediately for in-memory use
+          att.url = loadAttachmentData(msg.id, i);
+        }
+      }
+    }
+    return msgs;
   } catch {
     return [];
   }
@@ -232,21 +270,27 @@ function saveConvMessages(
   messages: ChatMessage[],
 ): void {
   const key = getConvMsgKey(username, convId);
-  // Replace large data: URLs with idb: keys before writing to localStorage.
-  // storeAttachment seeds memoryCache synchronously, so the IDB write is fire-and-forget.
-  // Store full data URLs directly - no idb: indirection to avoid blank images on refresh
-  const serializable = messages;
+  // Replace data: URLs with sentinel keys to keep messages JSON small
+  const msgsToStore = messages.map((msg) => ({
+    ...msg,
+    attachments: (msg.attachments || []).map((att, i) => {
+      if (att.url?.startsWith("data:")) {
+        saveAttachmentData(msg.id, i, att.url);
+        return { ...att, url: `local:${msg.id}_${i}` };
+      }
+      return att;
+    }),
+  }));
   try {
     localStorage.setItem(
       key,
-      JSON.stringify(serializable, (_k, v) =>
+      JSON.stringify(msgsToStore, (_k, v) =>
         typeof v === "bigint" ? `__bigint__${v}` : v,
       ),
     );
   } catch {
-    // Quota exceeded: try without attachments
     try {
-      const noAttach = serializable.map((msg) => ({ ...msg, attachments: [] }));
+      const noAttach = msgsToStore.map((msg) => ({ ...msg, attachments: [] }));
       localStorage.setItem(
         key,
         JSON.stringify(noAttach, (_k, v) =>
@@ -254,9 +298,7 @@ function saveConvMessages(
         ),
       );
     } catch {
-      console.warn(
-        "saveConvMessages: localStorage quota exceeded, messages not saved",
-      );
+      // nothing we can do
     }
   }
 }
@@ -270,44 +312,7 @@ function clearConvMessages(username: string, convId: string): void {
 function canTeachGlobal(): boolean {
   const username = getCurrentUser() || "";
   if (!username) return false;
-  if (isClass6(username)) return true;
-  const profileId = getActiveProfileId();
-  try {
-    const raw = localStorage.getItem(`sentry_ai_trainers_${profileId}`);
-    const trainers: string[] = raw ? JSON.parse(raw) : [];
-    return trainers.some((t) => t.toLowerCase() === username.toLowerCase());
-  } catch {
-    return false;
-  }
-}
-
-/** Compress an image data URL to a JPEG at max 300x300 to fit in localStorage. */
-async function compressImageDataUrl(dataUrl: string): Promise<string> {
-  return new Promise((resolve) => {
-    const img = new window.Image();
-    img.onload = () => {
-      const MAX = 300;
-      let w = img.naturalWidth;
-      let h = img.naturalHeight;
-      if (w > MAX || h > MAX) {
-        const ratio = Math.min(MAX / w, MAX / h);
-        w = Math.round(w * ratio);
-        h = Math.round(h * ratio);
-      }
-      const canvas = document.createElement("canvas");
-      canvas.width = w;
-      canvas.height = h;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) {
-        resolve(dataUrl);
-        return;
-      }
-      ctx.drawImage(img, 0, 0, w, h);
-      resolve(canvas.toDataURL("image/jpeg", 0.85));
-    };
-    img.onerror = () => resolve(dataUrl);
-    img.src = dataUrl;
-  });
+  return isClass6(username) || isClass5ForProfile(username);
 }
 
 /** Analyze image data URL via canvas to generate a description. */
@@ -324,8 +329,8 @@ async function analyzeImageDataUrl(
       const h = img.naturalHeight || height || 0;
       try {
         const canvas = document.createElement("canvas");
-        canvas.width = Math.min(w, 120);
-        canvas.height = Math.min(h, 120);
+        canvas.width = Math.min(w, 80);
+        canvas.height = Math.min(h, 80);
         const ctx = canvas.getContext("2d");
         if (!ctx) {
           resolve(
@@ -335,103 +340,41 @@ async function analyzeImageDataUrl(
         }
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
         const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-
-        // Sample every 4th pixel for more coverage
-        let totalR = 0;
-        let totalG = 0;
-        let totalB = 0;
-        let totalBright = 0;
-        let hueCounts = new Array(12).fill(0); // 12 buckets of 30° each
-        let sampleCount = 0;
-
-        for (let i = 0; i < pixels.length; i += 16) {
-          // step by 4 pixels (4 channels each)
-          const r = pixels[i];
-          const g = pixels[i + 1];
-          const b = pixels[i + 2];
-          totalR += r;
-          totalG += g;
-          totalB += b;
-          totalBright += (r + g + b) / 3;
-          sampleCount++;
-
-          // Convert RGB to HSL to get hue
-          const rn = r / 255;
-          const gn = g / 255;
-          const bn = b / 255;
-          const max = Math.max(rn, gn, bn);
-          const min = Math.min(rn, gn, bn);
-          const l = (max + min) / 2;
-          const s =
-            max === min
-              ? 0
-              : l > 0.5
-                ? (max - min) / (2 - max - min)
-                : (max - min) / (max + min);
-          if (s > 0.15) {
-            // only count saturated pixels for hue
-            let h = 0;
-            if (max === rn) h = (((gn - bn) / (max - min) + 6) % 6) * 60;
-            else if (max === gn) h = ((bn - rn) / (max - min) + 2) * 60;
-            else h = ((rn - gn) / (max - min) + 4) * 60;
-            hueCounts[Math.floor(h / 30) % 12]++;
-          }
+        let r = 0;
+        let g = 0;
+        let b = 0;
+        let bright = 0;
+        const count = pixels.length / 4;
+        for (let i = 0; i < pixels.length; i += 4) {
+          r += pixels[i];
+          g += pixels[i + 1];
+          b += pixels[i + 2];
+          bright += (pixels[i] + pixels[i + 1] + pixels[i + 2]) / 3;
         }
-
-        if (sampleCount === 0) {
-          resolve(
-            `Received ${type === "gif" ? "an animated GIF" : "an image"}.`,
-          );
-          return;
-        }
-
-        const avgR = totalR / sampleCount;
-        const avgG = totalG / sampleCount;
-        const avgB = totalB / sampleCount;
-        const avgBright = totalBright / sampleCount;
-
-        // Detect dominant hue
-        const dominantBucket = hueCounts.indexOf(Math.max(...hueCounts));
-        const totalSaturated = hueCounts.reduce((a, b) => a + b, 0);
-        const avgRn = avgR / 255;
-        const avgGn = avgG / 255;
-        const avgBn = avgB / 255;
-        const maxC = Math.max(avgRn, avgGn, avgBn);
-        const minC = Math.min(avgRn, avgGn, avgBn);
-        const avgSat =
-          maxC === minC ? 0 : (maxC - minC) / (1 - Math.abs(maxC + minC - 1));
-
-        let colorDesc = "neutral";
-        if (avgSat < 0.12 || totalSaturated < sampleCount * 0.05) {
-          colorDesc = "black and white / grayscale";
-        } else {
-          const hue = dominantBucket * 30;
-          if (hue >= 330 || hue < 30) colorDesc = "red tones";
-          else if (hue < 60) colorDesc = "orange tones";
-          else if (hue < 90) colorDesc = "yellow/orange tones";
-          else if (hue < 150) colorDesc = "green tones";
-          else if (hue < 210) colorDesc = "cyan/teal tones";
-          else if (hue < 270) colorDesc = "blue tones";
-          else colorDesc = "purple/pink tones";
-        }
-
-        const lightDesc =
-          avgBright > 210
-            ? "bright/daytime scene"
-            : avgBright > 160
-              ? "well-lit scene"
-              : avgBright > 90
-                ? "mid-toned scene"
-                : avgBright > 40
-                  ? "dark/indoor scene"
-                  : "dark/night scene";
-
-        const prefix =
-          type === "gif"
-            ? "This animated GIF appears to show"
-            : "This appears to be";
+        r /= count;
+        g /= count;
+        b /= count;
+        bright /= count;
+        const tone =
+          r > g + 20 && r > b + 20
+            ? "warm reddish"
+            : g > r + 20 && g > b + 20
+              ? "cool green"
+              : b > r + 20 && b > g + 20
+                ? "blue-toned"
+                : r > 180 && g > 160 && b < 100
+                  ? "warm golden"
+                  : "neutral";
+        const lighting =
+          bright > 190
+            ? "very bright"
+            : bright > 130
+              ? "well-lit"
+              : bright > 70
+                ? "mid-toned"
+                : "dark";
         resolve(
-          `${prefix} a ${lightDesc} with ${colorDesc}, captured at ${w}×${h}.`,
+          `This ${type === "gif" ? "animated GIF" : "image"} is ${w}×${h}px with ${tone} tones and ${lighting} lighting.`,
         );
       } catch {
         resolve(
@@ -597,28 +540,16 @@ function CodeBlock({
 }
 
 function AttachmentDisplay({ attachment }: { attachment: Attachment }) {
-  const [resolvedUrl, setResolvedUrl] = useState<string>(() => {
-    if (!attachment.url) return "";
-    if (attachment.url.startsWith("idb:")) {
-      return getAttachmentFromCache(attachment.url.slice(4)) ?? "";
+  const resolvedUrl = React.useMemo(() => {
+    const u = attachment.url || "";
+    if (u.startsWith("local:")) {
+      const ref = u.slice(6);
+      const parts = ref.split("_");
+      const idx = Number.parseInt(parts[parts.length - 1], 10);
+      const msgIdPart = parts.slice(0, -1).join("_");
+      return loadAttachmentData(msgIdPart, idx);
     }
-    return attachment.url;
-  });
-
-  useEffect(() => {
-    if (attachment.url?.startsWith("idb:")) {
-      const key = attachment.url.slice(4);
-      const cached = getAttachmentFromCache(key);
-      if (cached) {
-        setResolvedUrl(cached);
-      } else {
-        loadAttachment(key).then((data) => {
-          if (data) setResolvedUrl(data);
-        });
-      }
-    } else {
-      setResolvedUrl(attachment.url || "");
-    }
+    return u;
   }, [attachment.url]);
 
   if (attachment.type === "code") {
@@ -631,19 +562,15 @@ function AttachmentDisplay({ attachment }: { attachment: Attachment }) {
   }
 
   if (attachment.type === "gif") {
-    const displayUrl =
-      resolvedUrl ||
-      (attachment.url?.startsWith("data:") ? attachment.url : "") ||
-      "";
-    if (!displayUrl)
+    if (!resolvedUrl)
       return (
         <span className="text-xs text-muted-foreground font-mono italic">
-          [GIF loading…]
+          [GIF not available]
         </span>
       );
     return (
       <img
-        src={displayUrl}
+        src={resolvedUrl}
         alt={attachment.name || "GIF"}
         loading="eager"
         decoding="async"
@@ -756,44 +683,27 @@ export default function ChatPanel() {
     const cid = getActiveConvId(u);
     return loadConvMessages(u, cid);
   });
+  const messagesRef = useRef(messages);
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+  const convIdRef = useRef(convId);
+  useEffect(() => {
+    convIdRef.current = convId;
+  }, [convId]);
 
   // Per-profile AI avatar — takes precedence over canister avatar
   const [perProfileAiAvatar, setPerProfileAiAvatar] = useState<string>(() => {
     return localStorage.getItem(getAiAvatarKey()) || "";
   });
 
-  // Resolve idb: attachment refs in messages loaded from localStorage
-  useEffect(() => {
-    const u = getCurrentUser() || "";
-    const rawMsgs = loadConvMessages(u, convId);
-    const hasIdbRefs = rawMsgs.some((m) =>
-      (m.attachments || []).some((a) => a.url?.startsWith("idb:")),
-    );
-    if (!hasIdbRefs) return;
-    (async () => {
-      const resolved = await Promise.all(
-        rawMsgs.map(async (msg) => {
-          if (!(msg.attachments || []).some((a) => a.url?.startsWith("idb:")))
-            return msg;
-          const attachments = await Promise.all(
-            (msg.attachments || []).map(async (att) => {
-              if (!att.url?.startsWith("idb:")) return att;
-              const data = await loadAttachment(att.url.slice(4));
-              return data ? { ...att, url: data } : att;
-            }),
-          );
-          return { ...msg, attachments };
-        }),
-      );
-      const resolvedMap = new Map(resolved.map((m) => [m.id, m]));
-      setMessages((prev) => prev.map((m) => resolvedMap.get(m.id) ?? m));
-    })();
-  }, [convId]);
+  // No IDB warming needed — attachments stored as data URLs directly
 
   // Re-initialize conversations when the active AI profile changes
   useEffect(() => {
     const reloadForProfile = () => {
       const u = getCurrentUser() || "";
+      if (u) saveConvMessages(u, convIdRef.current, messagesRef.current);
       const newConvId = getActiveConvId(u);
       setConversations(loadConversations(u));
       setConvId(newConvId);
@@ -806,33 +716,7 @@ export default function ChatPanel() {
       setPerProfileAiAvatar(
         localStorage.getItem(`sentry_ai_avatar_${newPid}`) || "",
       );
-      // Resolve idb: refs in new profile messages
-      const newMsgs = loadConvMessages(u, newConvId);
-      const hasIdb = newMsgs.some((m) =>
-        (m.attachments || []).some((a) => a.url?.startsWith("idb:")),
-      );
-      if (hasIdb) {
-        (async () => {
-          const resolved = await Promise.all(
-            newMsgs.map(async (msg) => {
-              if (
-                !(msg.attachments || []).some((a) => a.url?.startsWith("idb:"))
-              )
-                return msg;
-              const attachments = await Promise.all(
-                (msg.attachments || []).map(async (att) => {
-                  if (!att.url?.startsWith("idb:")) return att;
-                  const data = await loadAttachment(att.url.slice(4));
-                  return data ? { ...att, url: data } : att;
-                }),
-              );
-              return { ...msg, attachments };
-            }),
-          );
-          const resolvedMap = new Map(resolved.map((m) => [m.id, m]));
-          setMessages((prev) => prev.map((m) => resolvedMap.get(m.id) ?? m));
-        })();
-      }
+      // No IDB re-warm needed — attachments stored as data URLs directly
     };
     const handleStorageChange = (e: StorageEvent) => {
       if (e.key === "sentry_active_profile") reloadForProfile();
@@ -932,7 +816,6 @@ export default function ChatPanel() {
   // Effective AI avatar: per-profile local storage takes precedence over canister
   const effectiveAiAvatar = perProfileAiAvatar || sentryAvatarUrl;
 
-  const { data: canisterMessages = [] } = useGetChatMessages();
   const { data: canisterGifs = [] } = useGetCustomGifs();
   const { data: canisterEmojis = [] } = useGetCustomEmojis();
 
@@ -948,33 +831,7 @@ export default function ChatPanel() {
   const addTimeline = useAddTimelineEntry();
   const updatePersonality = useUpdatePersonality();
   const setUserAvatar = useSetUserAvatar();
-  const _setSentryAvatar = useSetSentryAvatar();
-
-  // Sync messages from canister into local state
-  useEffect(() => {
-    if (canisterMessages.length > 0) {
-      const converted: ChatMessage[] = canisterMessages.map((m) => ({
-        id: m.id.toString(),
-        role: m.role as "user" | "sentry",
-        name: m.name,
-        content: m.content,
-        attachments: (() => {
-          try {
-            return JSON.parse(m.attachmentsJson || "[]");
-          } catch {
-            return [];
-          }
-        })(),
-        timestamp: Number(m.timestamp) / 1_000_000,
-        avatarUrl: "",
-      }));
-      setMessages((prev) => {
-        const existingIds = new Set(prev.map((m) => m.id));
-        const newOnes = converted.filter((m) => !existingIds.has(m.id));
-        return [...prev, ...newOnes];
-      });
-    }
-  }, [canisterMessages]);
+  const setSentryAvatar = useSetSentryAvatar();
 
   // Save messages to localStorage whenever they change
   useEffect(() => {
@@ -1526,8 +1383,9 @@ export default function ChatPanel() {
             else if (file.type.startsWith("audio/")) type = "audio";
             else if (file.type.startsWith("video/")) type = "video";
 
-            // Store the full dataUrl in the message so it renders immediately and persists.
+            // Save data URL separately under a sentinel key to avoid quota issues
             const msgId = crypto.randomUUID();
+            saveAttachmentData(msgId, 0, dataUrl);
             const userMsg = addMessage({
               id: msgId,
               role: "user",
@@ -1652,20 +1510,18 @@ export default function ChatPanel() {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = async (ev) => {
-      const raw = ev.target?.result as string;
-      // Compress before saving to avoid localStorage quota errors
-      const dataUrl = await compressImageDataUrl(raw);
+      const dataUrl = ev.target?.result as string;
+      // Save to per-profile localStorage key immediately
       const pid = getActiveProfileId();
-      try {
-        localStorage.setItem(`sentry_ai_avatar_${pid}`, dataUrl);
-      } catch {
-        toast.error("Image too large to save. Please use a smaller image.");
-        return;
-      }
+      localStorage.setItem(`sentry_ai_avatar_${pid}`, dataUrl);
       setPerProfileAiAvatar(dataUrl);
-      // Notify all panels (Header, MemoryExplorer) to refresh avatar
-      window.dispatchEvent(new CustomEvent("sentry_ai_avatar_changed"));
-      toast.success("AI avatar updated.");
+      // Also attempt to sync to canister
+      try {
+        await setSentryAvatar.mutateAsync(dataUrl);
+        toast.success("AI avatar updated.");
+      } catch {
+        toast.success("AI avatar saved locally.");
+      }
     };
     reader.readAsDataURL(file);
     e.target.value = "";
@@ -1822,6 +1678,7 @@ export default function ChatPanel() {
                         className="flex-1 text-left text-xs font-mono text-foreground truncate hover:text-gold"
                         onClick={() => {
                           const u = getCurrentUser() || "";
+                          saveConvMessages(u, convId, messages);
                           setActiveConvId(u, conv.id);
                           setConvId(conv.id);
                           const msgs = loadConvMessages(u, conv.id);
