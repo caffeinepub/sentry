@@ -133,7 +133,7 @@ export default function App() {
               <ChevronRight className="w-3 h-3" />
             </button>
           )}
-          <BrainVisualization />
+          <BrainVisualization key={activeProfileId} />
         </motion.div>
 
         {!rightOpen && (
@@ -205,7 +205,7 @@ export default function App() {
               BRAIN VISUALIZATION
             </span>
           </div>
-          <BrainVisualization />
+          <BrainVisualization key={activeProfileId} />
         </SheetContent>
       </Sheet>
 

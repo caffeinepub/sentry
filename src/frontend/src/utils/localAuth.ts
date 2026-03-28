@@ -9,9 +9,10 @@ interface Credential {
 const DEFAULT_CREDS: Credential[] = [
   { username: "Unity", password: "Bacon" },
   { username: "Syndelious", password: "Leviathan" },
-  { username: "Wolpdragos", password: "Cloud" },
-  { username: "wolfi da furri", password: "Manic" },
 ];
+
+// Protected users are always re-added if missing
+const PROTECTED_USERS = ["unity", "syndelious"];
 
 export function getCredentials(): Credential[] {
   try {
@@ -21,10 +22,11 @@ export function getCredentials(): Credential[] {
       return DEFAULT_CREDS;
     }
     const stored = JSON.parse(raw) as Credential[];
-    // Ensure default users always exist
+    // Only re-add protected users (Unity, Syndelious) if missing — not Wolpdragos/wolfi
     const merged = [...stored];
     for (const def of DEFAULT_CREDS) {
       if (
+        PROTECTED_USERS.includes(def.username.toLowerCase()) &&
         !merged.find(
           (c) => c.username.toLowerCase() === def.username.toLowerCase(),
         )

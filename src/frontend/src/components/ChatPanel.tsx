@@ -217,15 +217,15 @@ function setActiveConvId(username: string, convId: string): void {
 const ATTACH_KEY_PREFIX = "sentry_attach_";
 
 function saveAttachmentData(msgId: string, idx: number, dataUrl: string): void {
+  const key = `${ATTACH_KEY_PREFIX}${msgId}_${idx}`;
+  // Primary: store in IDB (no quota issues); fire-and-forget
+  storeAttachment(key, dataUrl).catch(() => {});
+  // Backup: also try localStorage
   try {
-    localStorage.setItem(`${ATTACH_KEY_PREFIX}${msgId}_${idx}`, dataUrl);
+    localStorage.setItem(key, dataUrl);
   } catch {
-    /* quota - attachment won't persist */
+    /* quota exceeded - IDB is primary anyway */
   }
-}
-
-function loadAttachmentData(msgId: string, idx: number): string {
-  return localStorage.getItem(`${ATTACH_KEY_PREFIX}${msgId}_${idx}`) || "";
 }
 
 function loadConvMessages(username: string, convId: string): ChatMessage[] {
@@ -243,19 +243,12 @@ function loadConvMessages(username: string, convId: string): ChatMessage[] {
       if (!msg.attachments) continue;
       for (let i = 0; i < msg.attachments.length; i++) {
         const att = msg.attachments[i];
-        if (att.url?.startsWith("local:")) {
-          const ref = att.url.slice(6);
-          const parts = ref.split("_");
-          const idx = Number.parseInt(parts[parts.length - 1], 10);
-          const msgIdPart = parts.slice(0, -1).join("_");
-          att.url = loadAttachmentData(msgIdPart, idx);
-        } else if (att.url?.startsWith("data:")) {
-          // Migrate: save separately and replace with sentinel
+        if (att.url?.startsWith("data:")) {
+          // Migrate: save separately and replace with sentinel; leave as local: for async resolution
           saveAttachmentData(msg.id, i, att.url);
           att.url = `local:${msg.id}_${i}`;
-          // Resolve immediately for in-memory use
-          att.url = loadAttachmentData(msg.id, i);
         }
+        // local: sentinels are left as-is; AttachmentDisplay resolves them asynchronously
       }
     }
     return msgs;
@@ -540,16 +533,34 @@ function CodeBlock({
 }
 
 function AttachmentDisplay({ attachment }: { attachment: Attachment }) {
-  const resolvedUrl = React.useMemo(() => {
+  const [resolvedUrl, setResolvedUrl] = React.useState<string>(() => {
     const u = attachment.url || "";
     if (u.startsWith("local:")) {
-      const ref = u.slice(6);
-      const parts = ref.split("_");
-      const idx = Number.parseInt(parts[parts.length - 1], 10);
-      const msgIdPart = parts.slice(0, -1).join("_");
-      return loadAttachmentData(msgIdPart, idx);
+      const key = `${ATTACH_KEY_PREFIX}${u.slice(6)}`;
+      // Synchronous cache hit (same session)
+      return getAttachmentFromCache(key) || localStorage.getItem(key) || "";
     }
     return u;
+  });
+
+  React.useEffect(() => {
+    const u = attachment.url || "";
+    if (!u.startsWith("local:")) {
+      setResolvedUrl(u);
+      return;
+    }
+    const key = `${ATTACH_KEY_PREFIX}${u.slice(6)}`;
+    const cached = getAttachmentFromCache(key) || localStorage.getItem(key);
+    if (cached) {
+      setResolvedUrl(cached);
+      return;
+    }
+    // Async IDB fallback
+    loadAttachment(key)
+      .then((result) => {
+        if (result) setResolvedUrl(result);
+      })
+      .catch(() => {});
   }, [attachment.url]);
 
   if (attachment.type === "code") {
@@ -1602,7 +1613,17 @@ export default function ChatPanel() {
                 }
                 if (e.key === "Escape") setRenamingCurrentChat(false);
               }}
-              onBlur={() => setRenamingCurrentChat(false)}
+              onBlur={() => {
+                const u = getCurrentUser() || "";
+                const updated = conversations.map((c) =>
+                  c.id === convId
+                    ? { ...c, name: currentChatNameDraft.trim() || c.name }
+                    : c,
+                );
+                saveConversations(u, updated);
+                setConversations(updated);
+                setRenamingCurrentChat(false);
+              }}
               className="flex-1 bg-transparent border-b border-gold/40 text-gold font-mono text-xs focus:outline-none min-w-0"
               // biome-ignore lint/a11y/noAutofocus: needed for inline rename UX
               // biome-ignore lint/correctness/useExhaustiveDependencies: stable
@@ -1669,7 +1690,17 @@ export default function ChatPanel() {
                           }
                           if (e.key === "Escape") setEditingConvId(null);
                         }}
-                        onBlur={() => setEditingConvId(null)}
+                        onBlur={() => {
+                          const u = getCurrentUser() || "";
+                          const updated = conversations.map((c) =>
+                            c.id === conv.id
+                              ? { ...c, name: convNameDraft.trim() || c.name }
+                              : c,
+                          );
+                          saveConversations(u, updated);
+                          setConversations(updated);
+                          setEditingConvId(null);
+                        }}
                         className="flex-1 bg-transparent border-b border-gold/40 text-gold font-mono text-xs focus:outline-none"
                       />
                     ) : (
@@ -1678,7 +1709,7 @@ export default function ChatPanel() {
                         className="flex-1 text-left text-xs font-mono text-foreground truncate hover:text-gold"
                         onClick={() => {
                           const u = getCurrentUser() || "";
-                          saveConvMessages(u, convId, messages);
+                          saveConvMessages(u, convId, messagesRef.current);
                           setActiveConvId(u, conv.id);
                           setConvId(conv.id);
                           const msgs = loadConvMessages(u, conv.id);
