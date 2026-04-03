@@ -11,8 +11,8 @@ const DEFAULT_CREDS: Credential[] = [
   { username: "Syndelious", password: "Leviathan" },
 ];
 
-// Protected users are always re-added if missing
-const PROTECTED_USERS = ["unity", "syndelious"];
+// Users that should be removed if they exist in stored credentials
+const DELETED_USERS = ["wolpdragos", "wolfi da furri"];
 
 export function getCredentials(): Credential[] {
   try {
@@ -21,12 +21,15 @@ export function getCredentials(): Credential[] {
       localStorage.setItem(AUTH_KEY, JSON.stringify(DEFAULT_CREDS));
       return DEFAULT_CREDS;
     }
-    const stored = JSON.parse(raw) as Credential[];
-    // Only re-add protected users (Unity, Syndelious) if missing — not Wolpdragos/wolfi
+    let stored = JSON.parse(raw) as Credential[];
+    // Remove any deleted users
+    stored = stored.filter(
+      (c) => !DELETED_USERS.includes(c.username.toLowerCase()),
+    );
+    // Ensure default users always exist
     const merged = [...stored];
     for (const def of DEFAULT_CREDS) {
       if (
-        PROTECTED_USERS.includes(def.username.toLowerCase()) &&
         !merged.find(
           (c) => c.username.toLowerCase() === def.username.toLowerCase(),
         )
@@ -34,7 +37,13 @@ export function getCredentials(): Credential[] {
         merged.push(def);
       }
     }
-    if (merged.length !== stored.length) {
+    if (
+      merged.length !== stored.length ||
+      stored.length !==
+        (JSON.parse(raw) as Credential[]).filter(
+          (c) => !DELETED_USERS.includes(c.username.toLowerCase()),
+        ).length
+    ) {
       localStorage.setItem(AUTH_KEY, JSON.stringify(merged));
     }
     return merged;
@@ -168,11 +177,19 @@ export function login(username: string, password: string): boolean {
   );
   if (!match) return false;
   localStorage.setItem(SESSION_KEY, match.username);
+  window.dispatchEvent(
+    new CustomEvent("sentry_user_changed", {
+      detail: { username: match.username },
+    }),
+  );
   return true;
 }
 
 export function logout(): void {
   localStorage.removeItem(SESSION_KEY);
+  window.dispatchEvent(
+    new CustomEvent("sentry_user_changed", { detail: { username: "" } }),
+  );
 }
 
 export function getCurrentUser(): string | null {

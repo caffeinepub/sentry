@@ -341,12 +341,35 @@ export default function MemoryExplorer({ onMemoryClick }: MemoryExplorerProps) {
     }
   };
 
+  async function compressImage(
+    dataUrl: string,
+    maxSize = 300,
+  ): Promise<string> {
+    return new Promise((resolve) => {
+      const img = new window.Image();
+      img.onload = () => {
+        const scale = Math.min(1, maxSize / Math.max(img.width, img.height));
+        const w = Math.round(img.width * scale);
+        const h = Math.round(img.height * scale);
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d")!;
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL("image/jpeg", 0.85));
+      };
+      img.onerror = () => resolve(dataUrl);
+      img.src = dataUrl;
+    });
+  }
+
   const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = async (ev) => {
-      const dataUrl = ev.target?.result as string;
+      const raw = ev.target?.result as string;
+      const dataUrl = await compressImage(raw);
       const pid = getActiveProfileId();
       localStorage.setItem(`sentry_ai_avatar_${pid}`, dataUrl);
       setActiveProfileAvatar(dataUrl);

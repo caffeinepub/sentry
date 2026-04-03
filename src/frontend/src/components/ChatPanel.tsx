@@ -217,15 +217,15 @@ function setActiveConvId(username: string, convId: string): void {
 const ATTACH_KEY_PREFIX = "sentry_attach_";
 
 function saveAttachmentData(msgId: string, idx: number, dataUrl: string): void {
-  const key = `${ATTACH_KEY_PREFIX}${msgId}_${idx}`;
-  // Primary: store in IDB (no quota issues); fire-and-forget
-  storeAttachment(key, dataUrl).catch(() => {});
-  // Backup: also try localStorage
   try {
-    localStorage.setItem(key, dataUrl);
+    localStorage.setItem(`${ATTACH_KEY_PREFIX}${msgId}_${idx}`, dataUrl);
   } catch {
-    /* quota exceeded - IDB is primary anyway */
+    /* quota - attachment won't persist */
   }
+}
+
+function loadAttachmentData(msgId: string, idx: number): string {
+  return localStorage.getItem(`${ATTACH_KEY_PREFIX}${msgId}_${idx}`) || "";
 }
 
 function loadConvMessages(username: string, convId: string): ChatMessage[] {
@@ -243,12 +243,19 @@ function loadConvMessages(username: string, convId: string): ChatMessage[] {
       if (!msg.attachments) continue;
       for (let i = 0; i < msg.attachments.length; i++) {
         const att = msg.attachments[i];
-        if (att.url?.startsWith("data:")) {
-          // Migrate: save separately and replace with sentinel; leave as local: for async resolution
+        if (att.url?.startsWith("local:")) {
+          const ref = att.url.slice(6);
+          const parts = ref.split("_");
+          const idx = Number.parseInt(parts[parts.length - 1], 10);
+          const msgIdPart = parts.slice(0, -1).join("_");
+          att.url = loadAttachmentData(msgIdPart, idx);
+        } else if (att.url?.startsWith("data:")) {
+          // Migrate: save separately and replace with sentinel
           saveAttachmentData(msg.id, i, att.url);
           att.url = `local:${msg.id}_${i}`;
+          // Resolve immediately for in-memory use
+          att.url = loadAttachmentData(msg.id, i);
         }
-        // local: sentinels are left as-is; AttachmentDisplay resolves them asynchronously
       }
     }
     return msgs;
@@ -533,34 +540,16 @@ function CodeBlock({
 }
 
 function AttachmentDisplay({ attachment }: { attachment: Attachment }) {
-  const [resolvedUrl, setResolvedUrl] = React.useState<string>(() => {
+  const resolvedUrl = React.useMemo(() => {
     const u = attachment.url || "";
     if (u.startsWith("local:")) {
-      const key = `${ATTACH_KEY_PREFIX}${u.slice(6)}`;
-      // Synchronous cache hit (same session)
-      return getAttachmentFromCache(key) || localStorage.getItem(key) || "";
+      const ref = u.slice(6);
+      const parts = ref.split("_");
+      const idx = Number.parseInt(parts[parts.length - 1], 10);
+      const msgIdPart = parts.slice(0, -1).join("_");
+      return loadAttachmentData(msgIdPart, idx);
     }
     return u;
-  });
-
-  React.useEffect(() => {
-    const u = attachment.url || "";
-    if (!u.startsWith("local:")) {
-      setResolvedUrl(u);
-      return;
-    }
-    const key = `${ATTACH_KEY_PREFIX}${u.slice(6)}`;
-    const cached = getAttachmentFromCache(key) || localStorage.getItem(key);
-    if (cached) {
-      setResolvedUrl(cached);
-      return;
-    }
-    // Async IDB fallback
-    loadAttachment(key)
-      .then((result) => {
-        if (result) setResolvedUrl(result);
-      })
-      .catch(() => {});
   }, [attachment.url]);
 
   if (attachment.type === "code") {
@@ -752,6 +741,28 @@ export default function ChatPanel() {
     };
     window.addEventListener("sentry_ai_name_changed", handleNameChange);
     window.addEventListener("sentry_ai_avatar_changed", handleAvatarChange2);
+    const reloadForUser = () => {
+      const u = getCurrentUser() || "";
+      const newConvId = u ? getActiveConvId(u) : "default";
+      setConversations(
+        u
+          ? loadConversations(u)
+          : [{ id: "default", name: "Main Chat", createdAt: Date.now() }],
+      );
+      setConvId(newConvId);
+      setMessages(u ? loadConvMessages(u, newConvId) : []);
+      const pid = localStorage.getItem("sentry_active_profile") || "default";
+      setAiDisplayName(
+        localStorage.getItem(`sentry_ai_name_${pid}`) || "SENTRY",
+      );
+      setPerProfileAiAvatar(
+        localStorage.getItem(`sentry_ai_avatar_${pid}`) || "",
+      );
+      setUserDisplayName(
+        u ? localStorage.getItem(`sentry_display_name_${u}`) || u : "",
+      );
+    };
+    window.addEventListener("sentry_user_changed", reloadForUser);
     return () => {
       window.removeEventListener("storage", handleStorageChange);
       window.removeEventListener(
@@ -763,6 +774,7 @@ export default function ChatPanel() {
         "sentry_ai_avatar_changed",
         handleAvatarChange2,
       );
+      window.removeEventListener("sentry_user_changed", reloadForUser);
     };
   }, []);
 
@@ -844,10 +856,16 @@ export default function ChatPanel() {
   const setUserAvatar = useSetUserAvatar();
   const setSentryAvatar = useSetSentryAvatar();
 
-  // Save messages to localStorage whenever they change
+  // Save messages to localStorage whenever they change (safe: never wipe existing with empty)
   useEffect(() => {
     const u = getCurrentUser() || "";
-    if (u) saveConvMessages(u, convId, messages);
+    if (!u) return; // no user, never save
+    const key = getConvMsgKey(u, convId);
+    if (messages.length === 0) {
+      const existing = localStorage.getItem(key);
+      if (existing && existing !== "[]") return; // don't overwrite non-empty saved data
+    }
+    saveConvMessages(u, convId, messages);
   }, [messages, convId]);
 
   // Auto-save every 30 seconds
@@ -1516,12 +1534,35 @@ export default function ChatPanel() {
     e.target.value = "";
   };
 
+  async function compressImage(
+    dataUrl: string,
+    maxSize = 300,
+  ): Promise<string> {
+    return new Promise((resolve) => {
+      const img = new window.Image();
+      img.onload = () => {
+        const scale = Math.min(1, maxSize / Math.max(img.width, img.height));
+        const w = Math.round(img.width * scale);
+        const h = Math.round(img.height * scale);
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d")!;
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL("image/jpeg", 0.85));
+      };
+      img.onerror = () => resolve(dataUrl);
+      img.src = dataUrl;
+    });
+  }
+
   const handleSentryAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = async (ev) => {
-      const dataUrl = ev.target?.result as string;
+      const raw = ev.target?.result as string;
+      const dataUrl = await compressImage(raw);
       // Save to per-profile localStorage key immediately
       const pid = getActiveProfileId();
       localStorage.setItem(`sentry_ai_avatar_${pid}`, dataUrl);
@@ -1613,17 +1654,7 @@ export default function ChatPanel() {
                 }
                 if (e.key === "Escape") setRenamingCurrentChat(false);
               }}
-              onBlur={() => {
-                const u = getCurrentUser() || "";
-                const updated = conversations.map((c) =>
-                  c.id === convId
-                    ? { ...c, name: currentChatNameDraft.trim() || c.name }
-                    : c,
-                );
-                saveConversations(u, updated);
-                setConversations(updated);
-                setRenamingCurrentChat(false);
-              }}
+              onBlur={() => setRenamingCurrentChat(false)}
               className="flex-1 bg-transparent border-b border-gold/40 text-gold font-mono text-xs focus:outline-none min-w-0"
               // biome-ignore lint/a11y/noAutofocus: needed for inline rename UX
               // biome-ignore lint/correctness/useExhaustiveDependencies: stable
@@ -1690,17 +1721,7 @@ export default function ChatPanel() {
                           }
                           if (e.key === "Escape") setEditingConvId(null);
                         }}
-                        onBlur={() => {
-                          const u = getCurrentUser() || "";
-                          const updated = conversations.map((c) =>
-                            c.id === conv.id
-                              ? { ...c, name: convNameDraft.trim() || c.name }
-                              : c,
-                          );
-                          saveConversations(u, updated);
-                          setConversations(updated);
-                          setEditingConvId(null);
-                        }}
+                        onBlur={() => setEditingConvId(null)}
                         className="flex-1 bg-transparent border-b border-gold/40 text-gold font-mono text-xs focus:outline-none"
                       />
                     ) : (
@@ -1709,7 +1730,7 @@ export default function ChatPanel() {
                         className="flex-1 text-left text-xs font-mono text-foreground truncate hover:text-gold"
                         onClick={() => {
                           const u = getCurrentUser() || "";
-                          saveConvMessages(u, convId, messagesRef.current);
+                          saveConvMessages(u, convId, messages);
                           setActiveConvId(u, conv.id);
                           setConvId(conv.id);
                           const msgs = loadConvMessages(u, conv.id);
@@ -1768,6 +1789,7 @@ export default function ChatPanel() {
                   className="w-full text-left text-[10px] font-mono text-gold hover:text-gold/80 px-2 py-1 flex items-center gap-1"
                   onClick={() => {
                     const u = getCurrentUser() || "";
+                    if (u) saveConvMessages(u, convId, messages); // save current before switching
                     const newConv: Conversation = {
                       id: `conv_${Date.now()}`,
                       name: `Chat ${conversations.length + 1}`,

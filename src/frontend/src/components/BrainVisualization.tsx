@@ -1,14 +1,15 @@
 import { Html, OrbitControls } from "@react-three/drei";
 import { Canvas, useFrame } from "@react-three/fiber";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
-import type { Memory, Rule } from "../backend.d";
+import type { Rule } from "../backend.d";
+import { getCurrentUser } from "../utils/localAuth";
 import {
-  useGetKnowledgeEdges,
-  useGetMemories,
-  useGetRules,
-  useGetUserMemories,
-} from "../hooks/useQueries";
+  getActiveProfileId,
+  getProfileGlobalMemories,
+  getProfileRules,
+  getProfileUserMemories,
+} from "../utils/localDB";
 
 interface NodeData {
   id: string;
@@ -116,19 +117,33 @@ function BrainNode({
   );
 }
 
-function EdgeLines({
-  nodes,
-  edges,
-}: { nodes: NodeData[]; edges: Array<{ fromId: bigint; toId: bigint }> }) {
-  const nodeMap = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
+function EdgeLines({ nodes }: { nodes: NodeData[] }) {
+  const edges = useMemo(() => {
+    const result: Array<[NodeData, NodeData]> = [];
+    for (let i = 0; i < nodes.length && result.length < 120; i++) {
+      for (let j = i + 1; j < nodes.length && result.length < 120; j++) {
+        const aWords = nodes[i].label
+          .toLowerCase()
+          .split(/\W+/)
+          .filter((w) => w.length > 4);
+        const bWords = new Set(
+          nodes[j].label
+            .toLowerCase()
+            .split(/\W+/)
+            .filter((w) => w.length > 4),
+        );
+        if (aWords.some((w) => bWords.has(w))) {
+          result.push([nodes[i], nodes[j]]);
+        }
+      }
+    }
+    return result;
+  }, [nodes]);
 
   return (
     <>
-      {edges.slice(0, 200).map((edge) => {
-        const key = `${edge.fromId}-${edge.toId}`;
-        const from = nodeMap.get(edge.fromId.toString());
-        const to = nodeMap.get(edge.toId.toString());
-        if (!from || !to) return null;
+      {edges.map(([from, to]) => {
+        const key = `${from.id}-${to.id}`;
         const points = [from.basePosition, to.basePosition];
         return (
           <line key={key}>
@@ -149,17 +164,26 @@ function EdgeLines({
   );
 }
 
-function BrainScene({ activeNodeIds }: { activeNodeIds: bigint[] }) {
+interface ProfileData {
+  globalMemories: ReturnType<typeof getProfileGlobalMemories>;
+  userMemories: ReturnType<typeof getProfileUserMemories>;
+  rules: ReturnType<typeof getProfileRules>;
+}
+
+function BrainScene({
+  activeNodeIds,
+  profileData,
+}: {
+  activeNodeIds: bigint[];
+  profileData: ProfileData;
+}) {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
-  const { data: globalMemories = [] } = useGetMemories(true);
-  const { data: userMemories = [] } = useGetUserMemories();
-  const { data: rules = [] } = useGetRules();
-  const { data: edges = [] } = useGetKnowledgeEdges();
+  const { globalMemories, userMemories, rules } = profileData;
 
   const allItems = useMemo(
     () =>
       [
-        ...globalMemories.slice(0, 60).map((m: Memory) => ({
+        ...globalMemories.slice(0, 60).map((m) => ({
           id: m.id,
           label: m.text,
           type: (m.memoryType || "knowledge") as
@@ -168,7 +192,7 @@ function BrainScene({ activeNodeIds }: { activeNodeIds: bigint[] }) {
             | "history"
             | "personal",
         })),
-        ...userMemories.slice(0, 20).map((m: Memory) => ({
+        ...userMemories.slice(0, 20).map((m) => ({
           id: m.id,
           label: m.text,
           type: "personal" as const,
@@ -209,7 +233,7 @@ function BrainScene({ activeNodeIds }: { activeNodeIds: bigint[] }) {
         minDistance={2}
         maxDistance={8}
       />
-      <EdgeLines nodes={nodes} edges={edges} />
+      <EdgeLines nodes={nodes} />
       {nodes.map((node) => (
         <BrainNode
           key={node.id}
@@ -230,19 +254,47 @@ interface BrainVisualizationProps {
 export default function BrainVisualization({
   activeNodeIds = [],
 }: BrainVisualizationProps) {
-  const { data: globalMemories = [] } = useGetMemories(true);
-  const { data: userMemories = [] } = useGetUserMemories();
-  const { data: rules = [] } = useGetRules();
-  const nodeCount = Math.min(
-    globalMemories.length + userMemories.length + rules.length,
-    100,
-  );
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    const bump = () => setTick((t) => t + 1);
+    window.addEventListener("sentry_profile_changed", bump);
+    window.addEventListener("sentry_memory_updated", bump);
+    window.addEventListener("sentry_ai_taught", bump);
+    const interval = setInterval(bump, 4000);
+    return () => {
+      window.removeEventListener("sentry_profile_changed", bump);
+      window.removeEventListener("sentry_memory_updated", bump);
+      window.removeEventListener("sentry_ai_taught", bump);
+      clearInterval(interval);
+    };
+  }, []);
+
+  const username = getCurrentUser() ?? "";
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: tick is an intentional refresh counter
+  const profileData = useMemo(() => {
+    const pid = getActiveProfileId();
+    return {
+      globalMemories: getProfileGlobalMemories(pid),
+      userMemories: getProfileUserMemories(pid, username),
+      rules: getProfileRules(pid),
+    };
+  }, [username, tick]);
+
+  const pid = getActiveProfileId();
+  const profileName = localStorage.getItem(`sentry_ai_name_${pid}`) || "SENTRY";
+
+  const nodeCount =
+    Math.min(profileData.globalMemories.length, 60) +
+    Math.min(profileData.userMemories.length, 20) +
+    Math.min(profileData.rules.length, 20);
 
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between px-4 py-2 border-b border-border shrink-0">
         <span className="text-xs font-mono text-gold tracking-widest">
-          NEURAL MAP
+          NEURAL MAP — {profileName.toUpperCase()}
         </span>
         <span className="text-[10px] font-mono text-muted-foreground">
           {nodeCount} NODES
@@ -254,7 +306,7 @@ export default function BrainVisualization({
           style={{ background: "#050505" }}
           dpr={[1, 1.5]}
         >
-          <BrainScene activeNodeIds={activeNodeIds} />
+          <BrainScene activeNodeIds={activeNodeIds} profileData={profileData} />
         </Canvas>
         {nodeCount === 0 && (
           <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
@@ -262,7 +314,7 @@ export default function BrainVisualization({
               NO NODES YET
             </p>
             <p className="text-[10px] text-muted-foreground/50 font-mono mt-1">
-              TEACH SENTRY TO POPULATE
+              TEACH {profileName.toUpperCase()} TO POPULATE
             </p>
           </div>
         )}

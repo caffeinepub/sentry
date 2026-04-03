@@ -1,27 +1,33 @@
 # Sentry
 
 ## Current State
-- Wolpdragos and wolfi da furri are pre-seeded as DEFAULT_CREDS in localAuth.ts, which means they always get re-added even after deletion
-- BrainVisualization does not re-mount or re-fetch when AI profile changes — it has no `key` prop tied to `activeProfileId`
-- GIF attachments: stored with `local:` sentinel URL, but the `AttachmentDisplay` component resolves them from localStorage. Issue is that on message send, the data URL may not be saved before rendering.
-- Chat conversation list: names are saved to localStorage but `saveConversations` uses `getConvListKey()` which calls `getActiveProfileId()` at call time, so renames should persist. However `onBlur` fires and clears draft without saving.
+ChatPanel stores messages per (username, profileId, conversationId) triplet in localStorage. The save mechanism uses a `useEffect` on `[messages, convId]` with a `isMountedRef` guard to skip the first render. However several race conditions cause chats to be wiped:
+
+1. If `getCurrentUser()` returns `""` at mount (user state not yet hydrated), the lazy `useState` inits load from key `sentry_chat__default` instead of the real key — returning `[]`. Then `isMountedRef` is set `true` on that render, and the next render saves `[]` to the wrong or correct key, wiping real data.
+2. No listener for login/logout events — after login, `getCurrentUser()` changes but the component never reloads messages for the new user.
+3. New conversation creation does not explicitly save the current conversation before calling `setMessages([])`.
+4. The `reloadForProfile` handler saves before switching, but relies on `convIdRef.current` which may lag one render behind.
 
 ## Requested Changes (Diff)
 
 ### Add
-- Nothing new to add
+- Login/logout event listener in ChatPanel: when `sentry_user_changed` fires (or localStorage `sentry_current_user` changes), reload all conversation state for the new user
+- Explicit `saveConvMessages` call before `setMessages([])` in the new-conversation handler
+- Guard in the save `useEffect`: only save if username is non-empty AND messages array is non-empty OR the key already has data (prevent wiping with [])
 
 ### Modify
-- `localAuth.ts`: Remove Wolpdragos and wolfi da furri from DEFAULT_CREDS. Keep only Unity and Syndelious as defaults.
-- `App.tsx`: Pass `key={activeProfileId}` to both BrainVisualization instances so they remount on profile switch
-- `ChatPanel.tsx`: Fix GIF rendering — when a file is picked as GIF/image, ensure data URL is stored in the separate attachment key BEFORE calling setMessages so the sentinel URL resolves immediately
-- `ChatPanel.tsx`: Fix inline rename `onBlur` — it currently discards the name. Fix so it saves on blur too.
+- The save `useEffect` guard: replace `isMountedRef` approach with a smarter guard that checks `getCurrentUser()` returns a non-empty string before saving, and skips saving an empty array over an existing non-empty saved conversation
+- The `useState` lazy inits for `convId`, `conversations`, `messages`: add a fallback — if `getCurrentUser()` is empty at init time, defer to empty defaults but then reload once user is available
+- The `reloadForProfile` handler: synchronously save using `convIdRef.current` and `messagesRef.current` before any state update
+- The new-conversation button onClick: call `saveConvMessages(u, convId, messages)` before `setMessages([])`
+- All conversation-switch click handlers: already save before loading — verify they also update `convIdRef` and `messagesRef` synchronously
 
 ### Remove
-- Nothing
+- The `isMountedRef` pattern — replace with safer username-check guard
 
 ## Implementation Plan
-1. Edit `localAuth.ts` — remove Wolpdragos/wolfi from DEFAULT_CREDS array
-2. Edit `App.tsx` — add `key={activeProfileId}` to both BrainVisualization components
-3. Edit `ChatPanel.tsx` — fix GIF blank issue: when reading file, save attachment data BEFORE adding message to state
-4. Edit `ChatPanel.tsx` — fix rename onBlur to save the name (not just close edit mode)
+1. Replace `isMountedRef` save guard with: skip save if `getCurrentUser()` is empty; skip save if `messages.length === 0` and there's already saved data for that key (avoid wiping)
+2. Add `sentry_user_changed` custom event dispatch in `localAuth.ts` on login/logout
+3. Listen for `sentry_user_changed` (and `storage` key `sentry_current_user`) in ChatPanel — call a `reloadForUser()` function that re-reads conversations and messages for the new user
+4. In new-conversation onClick: add `saveConvMessages(u, convId, messages)` before `setConvId` and `setMessages([])`
+5. Ensure `messagesRef` and `convIdRef` are updated synchronously via refs before any async operations
