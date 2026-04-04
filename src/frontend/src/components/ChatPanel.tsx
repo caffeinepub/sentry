@@ -17,7 +17,8 @@ import {
   X,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import type React from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   useAddChatMessage,
@@ -248,12 +249,15 @@ function loadConvMessages(
         return BigInt(v.slice(10));
       return v;
     });
-    // Resolve legacy "local:" sentinel references (migration path only — new saves use inline data URLs)
+    // Resolve sentinels: "idb:" from IDB memory cache, "local:" from legacy storage
     for (const msg of msgs) {
       if (!msg.attachments) continue;
       for (let i = 0; i < msg.attachments.length; i++) {
         const att = msg.attachments[i];
-        if (att.url?.startsWith("local:")) {
+        if (att.url?.startsWith("idb:")) {
+          // Resolve from in-memory cache (populated by warm-up effect)
+          att.url = getAttachmentFromCache(att.url.slice(4)) || att.url;
+        } else if (att.url?.startsWith("local:")) {
           const ref = att.url.slice(6);
           const parts = ref.split("_");
           const idx = Number.parseInt(parts[parts.length - 1], 10);
@@ -270,25 +274,41 @@ function loadConvMessages(
   }
 }
 
-function saveConvMessages(
+async function saveConvMessages(
   username: string,
   convId: string,
   messages: ChatMessage[],
   profileId?: string,
-): void {
+): Promise<void> {
   const key = getConvMsgKey(username, convId, profileId);
-  // Store data URLs inline — no sentinel indirection
+  // Extract data: URLs into IDB and replace with idb: sentinels before saving
+  const saveable = await Promise.all(
+    messages.map(async (msg) => {
+      if (!msg.attachments || msg.attachments.length === 0) return msg;
+      const attachments = await Promise.all(
+        msg.attachments.map(async (att, i) => {
+          if (att.url?.startsWith("data:")) {
+            const idbKey = `${msg.id}_${i}`;
+            await storeAttachment(idbKey, att.url);
+            return { ...att, url: `idb:${idbKey}` };
+          }
+          return att;
+        }),
+      );
+      return { ...msg, attachments };
+    }),
+  );
   try {
     localStorage.setItem(
       key,
-      JSON.stringify(messages, (_k, v) =>
+      JSON.stringify(saveable, (_k, v) =>
         typeof v === "bigint" ? `__bigint__${v}` : v,
       ),
     );
   } catch {
-    // Quota exceeded: fall back to storing messages without attachment data
+    // Quota exceeded even with sentinels (very unlikely) — store without attachments
     try {
-      const noAttach = messages.map((msg) => ({
+      const noAttach = saveable.map((msg) => ({
         ...msg,
         attachments: (msg.attachments || []).map((att) =>
           att.url?.startsWith("data:") ? { ...att, url: "" } : att,
@@ -547,12 +567,12 @@ function CodeBlock({
 }
 
 function AttachmentDisplay({ attachment }: { attachment: Attachment }) {
-  const resolvedUrl = React.useMemo(() => {
+  const [resolvedUrl, setResolvedUrl] = useState<string>(() => {
     const u = attachment.url || "";
-    // Legacy "local:" sentinels are resolved in loadConvMessages during load.
-    // At render time the url should already be a data: URL or empty.
+    if (u.startsWith("idb:")) {
+      return getAttachmentFromCache(u.slice(4)) || "";
+    }
     if (u.startsWith("local:")) {
-      // Try to recover from old separate key (migration path)
       const ref = u.slice(6);
       const parts = ref.split("_");
       const idx = Number.parseInt(parts[parts.length - 1], 10);
@@ -560,6 +580,24 @@ function AttachmentDisplay({ attachment }: { attachment: Attachment }) {
       return localStorage.getItem(`sentry_attach_${msgIdPart}_${idx}`) || "";
     }
     return u;
+  });
+
+  useEffect(() => {
+    const u = attachment.url || "";
+    if (u.startsWith("idb:")) {
+      loadAttachment(u.slice(4)).then((data) => {
+        if (data) setResolvedUrl(data);
+      });
+    } else if (u.startsWith("local:")) {
+      const ref = u.slice(6);
+      const parts = ref.split("_");
+      const idx = Number.parseInt(parts[parts.length - 1], 10);
+      const msgIdPart = parts.slice(0, -1).join("_");
+      const stored = localStorage.getItem(`sentry_attach_${msgIdPart}_${idx}`);
+      if (stored) setResolvedUrl(stored);
+    } else {
+      setResolvedUrl(u);
+    }
   }, [attachment.url]);
 
   if (attachment.type === "code") {
@@ -708,7 +746,17 @@ export default function ChatPanel() {
     return localStorage.getItem(getAiAvatarKey()) || "";
   });
 
-  // No IDB warming needed — attachments stored as data URLs directly
+  // Warm IDB cache for all idb: sentinel attachments on mount
+  useEffect(() => {
+    const allMsgs = messagesRef.current;
+    for (const msg of allMsgs) {
+      for (const att of msg.attachments || []) {
+        if (att.url?.startsWith("idb:")) {
+          void loadAttachment(att.url.slice(4));
+        }
+      }
+    }
+  }, []); // run once on mount
 
   // Re-initialize conversations when the active AI profile changes
   useEffect(() => {
@@ -716,7 +764,7 @@ export default function ChatPanel() {
       const u = getCurrentUser() || "";
       // Save current conversation under the OLD profile before switching
       if (u)
-        saveConvMessages(
+        void saveConvMessages(
           u,
           convIdRef.current,
           messagesRef.current,
@@ -881,14 +929,14 @@ export default function ChatPanel() {
     const u = getCurrentUser() || "";
     if (!u) return; // no user, never save
     // Always save unconditionally (the old guard was incorrectly blocking saves on profile/user switch)
-    saveConvMessages(u, convId, messages, profileIdRef.current);
+    void saveConvMessages(u, convId, messages, profileIdRef.current);
   }, [messages, convId]);
 
   // Auto-save every 30 seconds
   useEffect(() => {
     const interval = setInterval(() => {
       const u = getCurrentUser() || "";
-      if (u) saveConvMessages(u, convId, messages, profileIdRef.current);
+      if (u) void saveConvMessages(u, convId, messages, profileIdRef.current);
     }, 30_000);
     return () => clearInterval(interval);
   }, [messages, convId]);
@@ -897,7 +945,7 @@ export default function ChatPanel() {
   useEffect(() => {
     const handleBeforeUnload = () => {
       const u = getCurrentUser() || "";
-      if (u) saveConvMessages(u, convId, messages, profileIdRef.current);
+      if (u) void saveConvMessages(u, convId, messages, profileIdRef.current);
     };
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
@@ -941,15 +989,32 @@ export default function ChatPanel() {
     }
   };
 
-  const insertGif = (gif: { url: string; gifLabel: string }) => {
-    const msg = addMessage({
-      role: "user",
-      name: currentUsername,
-      avatarUrl: userAvatarUrl,
-      content: "",
-      attachments: [{ type: "gif", url: gif.url, name: gif.gifLabel }],
-    });
-    persistMessage(msg);
+  const insertGif = async (gif: { url: string; gifLabel: string }) => {
+    let gifUrl = gif.url;
+    if (gifUrl.startsWith("data:")) {
+      const msgId = crypto.randomUUID();
+      const idbKey = `${msgId}_0`;
+      await storeAttachment(idbKey, gifUrl);
+      gifUrl = `idb:${idbKey}`;
+      const msg = addMessage({
+        id: msgId,
+        role: "user",
+        name: currentUsername,
+        avatarUrl: userAvatarUrl,
+        content: "",
+        attachments: [{ type: "gif", url: gifUrl, name: gif.gifLabel }],
+      });
+      persistMessage(msg);
+    } else {
+      const msg = addMessage({
+        role: "user",
+        name: currentUsername,
+        avatarUrl: userAvatarUrl,
+        content: "",
+        attachments: [{ type: "gif", url: gifUrl, name: gif.gifLabel }],
+      });
+      persistMessage(msg);
+    }
     setShowGif(false);
   };
 
@@ -1428,8 +1493,10 @@ export default function ChatPanel() {
             else if (file.type.startsWith("audio/")) type = "audio";
             else if (file.type.startsWith("video/")) type = "video";
 
-            // Data URL is stored inline — no sentinel indirection needed
+            // Store data URL in IDB and use idb: sentinel in message
             const msgId = crypto.randomUUID();
+            const idbKey = `${msgId}_0`;
+            await storeAttachment(idbKey, dataUrl);
             const userMsg = addMessage({
               id: msgId,
               role: "user",
@@ -1439,7 +1506,7 @@ export default function ChatPanel() {
               attachments: [
                 {
                   type,
-                  url: dataUrl,
+                  url: `idb:${idbKey}`,
                   name: file.name,
                   mimeType: file.type,
                 },
@@ -1526,7 +1593,7 @@ export default function ChatPanel() {
       const pid = profileIdRef.current;
       setTimeout(() => {
         setMessages((prev) => {
-          saveConvMessages(u, cid, prev, pid);
+          void saveConvMessages(u, cid, prev, pid);
           return prev;
         });
       }, 50);
@@ -1747,7 +1814,7 @@ export default function ChatPanel() {
                         onClick={() => {
                           const u = getCurrentUser() || "";
                           const pid = profileIdRef.current;
-                          saveConvMessages(u, convId, messages, pid);
+                          void saveConvMessages(u, convId, messages, pid);
                           setActiveConvId(u, conv.id, pid);
                           setConvId(conv.id);
                           const msgs = loadConvMessages(u, conv.id, pid);
@@ -1808,7 +1875,7 @@ export default function ChatPanel() {
                   onClick={() => {
                     const u = getCurrentUser() || "";
                     const pid = profileIdRef.current;
-                    if (u) saveConvMessages(u, convId, messages, pid); // save current before switching
+                    if (u) void saveConvMessages(u, convId, messages, pid); // save current before switching
                     const newConv: Conversation = {
                       id: `conv_${Date.now()}`,
                       name: `Chat ${conversations.length + 1}`,
