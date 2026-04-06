@@ -59,7 +59,6 @@ import {
 import {
   getAttachmentFromCache,
   loadAttachment,
-  storeAttachment,
 } from "../utils/attachmentStore";
 import {
   getCurrentUser,
@@ -249,23 +248,20 @@ function loadConvMessages(
         return BigInt(v.slice(10));
       return v;
     });
-    // Resolve sentinels: "idb:" from IDB memory cache, "local:" from legacy storage
+    // Handle legacy local: sentinels (recover from old separate key)
     for (const msg of msgs) {
       if (!msg.attachments) continue;
       for (let i = 0; i < msg.attachments.length; i++) {
         const att = msg.attachments[i];
-        if (att.url?.startsWith("idb:")) {
-          // Resolve from in-memory cache (populated by warm-up effect)
-          att.url = getAttachmentFromCache(att.url.slice(4)) || att.url;
-        } else if (att.url?.startsWith("local:")) {
+        if (att.url?.startsWith("local:")) {
           const ref = att.url.slice(6);
           const parts = ref.split("_");
           const idx = Number.parseInt(parts[parts.length - 1], 10);
           const msgIdPart = parts.slice(0, -1).join("_");
-          // Try to recover from the old separate key
           att.url =
             localStorage.getItem(`sentry_attach_${msgIdPart}_${idx}`) || "";
         }
+        // idb: sentinels will be resolved async in AttachmentDisplay
       }
     }
     return msgs;
@@ -281,37 +277,23 @@ async function saveConvMessages(
   profileId?: string,
 ): Promise<void> {
   const key = getConvMsgKey(username, convId, profileId);
-  // Extract data: URLs into IDB and replace with idb: sentinels before saving
-  const saveable = await Promise.all(
-    messages.map(async (msg) => {
-      if (!msg.attachments || msg.attachments.length === 0) return msg;
-      const attachments = await Promise.all(
-        msg.attachments.map(async (att, i) => {
-          if (att.url?.startsWith("data:")) {
-            const idbKey = `${msg.id}_${i}`;
-            await storeAttachment(idbKey, att.url);
-            return { ...att, url: `idb:${idbKey}` };
-          }
-          return att;
-        }),
-      );
-      return { ...msg, attachments };
-    }),
-  );
+  // Store data URLs directly in the message — no IDB indirection
   try {
     localStorage.setItem(
       key,
-      JSON.stringify(saveable, (_k, v) =>
+      JSON.stringify(messages, (_k, v) =>
         typeof v === "bigint" ? `__bigint__${v}` : v,
       ),
     );
   } catch {
-    // Quota exceeded even with sentinels (very unlikely) — store without attachments
+    // Quota exceeded — store messages without large attachment data
     try {
-      const noAttach = saveable.map((msg) => ({
+      const noAttach = messages.map((msg) => ({
         ...msg,
         attachments: (msg.attachments || []).map((att) =>
-          att.url?.startsWith("data:") ? { ...att, url: "" } : att,
+          att.url?.startsWith("data:")
+            ? { ...att, url: "[attachment too large]" }
+            : att,
         ),
       }));
       localStorage.setItem(
@@ -567,6 +549,7 @@ function CodeBlock({
 }
 
 function AttachmentDisplay({ attachment }: { attachment: Attachment }) {
+  // Resolve idb: sentinels (legacy) asynchronously; data URLs resolve instantly
   const [resolvedUrl, setResolvedUrl] = useState<string>(() => {
     const u = attachment.url || "";
     if (u.startsWith("idb:")) {
@@ -585,6 +568,7 @@ function AttachmentDisplay({ attachment }: { attachment: Attachment }) {
   useEffect(() => {
     const u = attachment.url || "";
     if (u.startsWith("idb:")) {
+      // Legacy sentinel — load from IDB
       loadAttachment(u.slice(4)).then((data) => {
         if (data) setResolvedUrl(data);
       });
@@ -596,6 +580,7 @@ function AttachmentDisplay({ attachment }: { attachment: Attachment }) {
       const stored = localStorage.getItem(`sentry_attach_${msgIdPart}_${idx}`);
       if (stored) setResolvedUrl(stored);
     } else {
+      // data: URLs or external URLs — use directly
       setResolvedUrl(u);
     }
   }, [attachment.url]);
@@ -613,7 +598,7 @@ function AttachmentDisplay({ attachment }: { attachment: Attachment }) {
     if (!resolvedUrl)
       return (
         <span className="text-xs text-muted-foreground font-mono italic">
-          [GIF not available]
+          [loading GIF…]
         </span>
       );
     return (
@@ -624,6 +609,9 @@ function AttachmentDisplay({ attachment }: { attachment: Attachment }) {
         decoding="async"
         className="max-w-xs max-h-48 rounded border border-border mt-1"
         style={{ display: "block", imageRendering: "auto" }}
+        onError={(e) => {
+          (e.target as HTMLImageElement).style.display = "none";
+        }}
       />
     );
   }
@@ -990,31 +978,15 @@ export default function ChatPanel() {
   };
 
   const insertGif = async (gif: { url: string; gifLabel: string }) => {
-    let gifUrl = gif.url;
-    if (gifUrl.startsWith("data:")) {
-      const msgId = crypto.randomUUID();
-      const idbKey = `${msgId}_0`;
-      await storeAttachment(idbKey, gifUrl);
-      gifUrl = `idb:${idbKey}`;
-      const msg = addMessage({
-        id: msgId,
-        role: "user",
-        name: currentUsername,
-        avatarUrl: userAvatarUrl,
-        content: "",
-        attachments: [{ type: "gif", url: gifUrl, name: gif.gifLabel }],
-      });
-      persistMessage(msg);
-    } else {
-      const msg = addMessage({
-        role: "user",
-        name: currentUsername,
-        avatarUrl: userAvatarUrl,
-        content: "",
-        attachments: [{ type: "gif", url: gifUrl, name: gif.gifLabel }],
-      });
-      persistMessage(msg);
-    }
+    // Store data URL directly in message — no IDB indirection
+    const msg = addMessage({
+      role: "user",
+      name: currentUsername,
+      avatarUrl: userAvatarUrl,
+      content: "",
+      attachments: [{ type: "gif", url: gif.url, name: gif.gifLabel }],
+    });
+    persistMessage(msg);
     setShowGif(false);
   };
 
@@ -1493,10 +1465,8 @@ export default function ChatPanel() {
             else if (file.type.startsWith("audio/")) type = "audio";
             else if (file.type.startsWith("video/")) type = "video";
 
-            // Store data URL in IDB and use idb: sentinel in message
+            // Store data URL directly in message — no IDB indirection
             const msgId = crypto.randomUUID();
-            const idbKey = `${msgId}_0`;
-            await storeAttachment(idbKey, dataUrl);
             const userMsg = addMessage({
               id: msgId,
               role: "user",
@@ -1506,7 +1476,7 @@ export default function ChatPanel() {
               attachments: [
                 {
                   type,
-                  url: `idb:${idbKey}`,
+                  url: dataUrl,
                   name: file.name,
                   mimeType: file.type,
                 },
