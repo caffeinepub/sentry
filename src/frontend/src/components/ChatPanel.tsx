@@ -59,6 +59,7 @@ import {
 import {
   getAttachmentFromCache,
   loadAttachment,
+  storeAttachment,
 } from "../utils/attachmentStore";
 import {
   getCurrentUser,
@@ -734,16 +735,37 @@ export default function ChatPanel() {
     return localStorage.getItem(getAiAvatarKey()) || "";
   });
 
-  // Warm IDB cache for all idb: sentinel attachments on mount
+  // Warm IDB cache by scanning ALL stored conversations across all profiles/users
   useEffect(() => {
-    const allMsgs = messagesRef.current;
-    for (const msg of allMsgs) {
-      for (const att of msg.attachments || []) {
-        if (att.url?.startsWith("idb:")) {
-          void loadAttachment(att.url.slice(4));
+    const warmAllAttachments = async () => {
+      const idbKeys = new Set<string>();
+      // Scan all localStorage keys that could contain messages
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (!key) continue;
+        if (key.startsWith("sentry_chat_") || key.startsWith("sentry_conv_")) {
+          try {
+            const raw = localStorage.getItem(key);
+            if (!raw) continue;
+            const msgs = JSON.parse(raw);
+            if (!Array.isArray(msgs)) continue;
+            for (const msg of msgs) {
+              for (const att of msg.attachments || []) {
+                if (typeof att.url === "string" && att.url.startsWith("idb:")) {
+                  idbKeys.add(att.url.slice(4));
+                }
+              }
+            }
+          } catch {
+            // skip malformed entries
+          }
         }
       }
-    }
+      for (const key of idbKeys) {
+        void loadAttachment(key);
+      }
+    };
+    void warmAllAttachments();
   }, []); // run once on mount
 
   // Re-initialize conversations when the active AI profile changes
@@ -978,13 +1000,19 @@ export default function ChatPanel() {
   };
 
   const insertGif = async (gif: { url: string; gifLabel: string }) => {
-    // Store data URL directly in message — no IDB indirection
+    // Store data-URL gifs in IndexedDB; external URLs used directly
+    let gifUrl = gif.url;
+    if (gif.url.startsWith("data:")) {
+      const idbKey = `attach_gif_${Date.now()}`;
+      await storeAttachment(idbKey, gif.url);
+      gifUrl = `idb:${idbKey}`;
+    }
     const msg = addMessage({
       role: "user",
       name: currentUsername,
       avatarUrl: userAvatarUrl,
       content: "",
-      attachments: [{ type: "gif", url: gif.url, name: gif.gifLabel }],
+      attachments: [{ type: "gif", url: gifUrl, name: gif.gifLabel }],
     });
     persistMessage(msg);
     setShowGif(false);
@@ -1465,8 +1493,14 @@ export default function ChatPanel() {
             else if (file.type.startsWith("audio/")) type = "audio";
             else if (file.type.startsWith("video/")) type = "video";
 
-            // Store data URL directly in message — no IDB indirection
+            // Store large attachments (gif/image) in IndexedDB to avoid localStorage quota issues
             const msgId = crypto.randomUUID();
+            let attachmentUrl = dataUrl;
+            if (type === "gif" || type === "image") {
+              const idbKey = `attach_${msgId}_0`;
+              await storeAttachment(idbKey, dataUrl);
+              attachmentUrl = `idb:${idbKey}`;
+            }
             const userMsg = addMessage({
               id: msgId,
               role: "user",
@@ -1476,7 +1510,7 @@ export default function ChatPanel() {
               attachments: [
                 {
                   type,
-                  url: dataUrl,
+                  url: attachmentUrl,
                   name: file.name,
                   mimeType: file.type,
                 },
